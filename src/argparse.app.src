@@ -1,0 +1,10 @@
+{application, argparse,
+ [{description, "argparse: command line parser"},
+  {vsn, "0.1.0"},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {licenses, ["BSD 3-clause clear"]},
+  {links, [{"GitHub", "https://github.com/max-au/argparse"}]}
+ ]}.
