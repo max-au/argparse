@@ -1,11 +1,9 @@
 %%%-------------------------------------------------------------------
-%%% @author dane
-%%% @copyright (C) 2019, <COMPANY>
+%%% @author Maxim Fedorov
+%%% @copyright (C) 2019, Maxim Fedorov
 %%% @doc
-%%%
+%%%  Tests for argparse library.
 %%% @end
-%%% Created : 27. Jan 2019 11:27
-%%%-------------------------------------------------------------------
 -module(argparse_SUITE).
 -author("maximfca@gmail.com").
 
@@ -21,7 +19,10 @@
     negative/0, negative/1,
     python_issue_15112/0, python_issue_15112/1,
     type_validators/0, type_validators/1,
-    error_format/0, error_format/1
+    error_format/0, error_format/1,
+    subcommand/0, subcommand/1,
+    very_short/0, very_short/1,
+    multi_short/0, multi_short/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -29,12 +30,12 @@
 
 
 suite() ->
-    [{timetrap, {seconds, 10}}].
+    [{timetrap, {seconds, 5}}].
 
 groups() ->
     [{parallel, [parallel], [
         basic, single_arg_built_in_types, complex_command, errors, args, argparse, negative,
-        python_issue_15112, type_validators
+        python_issue_15112, type_validators, subcommand, error_format, very_short, multi_short
     ]}].
 
 all() ->
@@ -43,17 +44,11 @@ all() ->
 %%--------------------------------------------------------------------
 %% Helpers
 
-%% very complex option map - basically having everything in it!
-opt_map() ->
-    #{options => [
-        %% options
-        #{name => string, short => $s, long => "-string", action => append, help => "String list option"},
-        #{name => boolean, type => boolean, short => $b, action => append, help => "Boolean list option"},
-        #{name => float, type => float, short => $f, long => "-float", action => append, help => "Float option"},
-        %% positional args
-        #{name => integer, type => int, help => "Integer variable"},
-        #{name => string, help => "alias for string option", action => extend, nargs => list}
-    ]}.
+make_error(CmdLine, CmdMap) ->
+    try parse(CmdLine, CmdMap), exit(must_never_succeed)
+    catch error:Reason ->
+        argparse:format_error(Reason)
+    end.
 
 parse_opts(Args, Opts) ->
     argparse:parse(string:lexemes(Args, " "), #{options => Opts}).
@@ -156,13 +151,46 @@ type_validators(Config) when is_list(Config) ->
         parse_opts("me", [#{name => bin, type => {binary, <<"me.me">>}}])),
     ?assertException(error, {invalid_argument,undefined,bin, "me"},
         parse_opts("me", [#{name => bin, type => {binary, <<"me.me">>, []}}])),
+    %% now successful regexes
+    ?assertEqual({undefined, #{str => "me"}},
+        parse_opts("me", [#{name => str, type => {string, "m."}}])),
+    ?assertEqual({undefined, #{str => "me"}},
+        parse_opts("me", [#{name => str, type => {string, "m.", []}}])),
+    ?assertEqual({undefined, #{str => "me"}},
+        parse_opts("me", [#{name => str, type => {string, "m.", [{capture, none}]}}])),
+    %% and for binary too...
+    ?assertEqual({undefined, #{bin => <<"me">>}},
+        parse_opts("me", [#{name => bin, type => {binary, <<"m.">>}}])),
+    ?assertEqual({undefined, #{bin => <<"me">>}},
+        parse_opts("me", [#{name => bin, type => {binary, <<"m.">>, []}}])),
+    ?assertEqual({undefined, #{bin => <<"me">>}},
+        parse_opts("me", [#{name => bin, type => {binary, <<"m.">>, [{capture, none}]}}])),
+    %% more successes
+    ?assertEqual({undefined,#{int => 5}},
+        parse_opts("5", [#{name => int, type => {int, [{min, 0}, {max, 10}]}}])),
+    ?assertEqual({undefined,#{bin => <<"5">>}},
+        parse_opts("5", [#{name => bin, type => binary}])),
+    ?assertEqual({undefined,#{str => "011"}},
+        parse_opts("11", [#{name => str, type => {custom, fun(S) -> [$0|S] end}}])),
+    %% funny non-atom-atom
+    {undefined, ArgMap} = parse_opts("$can_never_be", [#{name => atom, type => {atom, unsafe}}]),
+    ?assert(is_map_key(atom, ArgMap)), %% must be successful, but really we can't create an atom in code!
+    %% other validators?
     ok.
 
 complex_command() ->
     [{doc, "Parses a complex command that has a mix of optional and positional arguments"}].
 
 complex_command(Config) when is_list(Config) ->
-    OptMap = opt_map(),
+    OptMap = #{options => [
+        %% options
+        #{name => string, short => $s, long => "-string", action => append, help => "String list option"},
+        #{name => boolean, type => boolean, short => $b, action => append, help => "Boolean list option"},
+        #{name => float, type => float, short => $f, long => "-float", action => append, help => "Float option"},
+        %% positional args
+        #{name => integer, type => int, help => "Integer variable"},
+        #{name => string, help => "alias for string option", action => extend, nargs => list}
+    ]},
     CmdMap = #{start => OptMap},
     Parsed = parse_cmd("start --float 1.04 -f 112 -b -b -s s1 42 --string s2 s3 s4", CmdMap),
     Expected = {[{start, OptMap}], #{float => [1.04, 112], boolean => [true, true], integer => 42, string => ["s1", "s2", "s3", "s4"]}},
@@ -253,7 +281,10 @@ args(Config) when is_list(Config) ->
     ?assertEqual({undefined, #{foo => c, bar => "XX"}},
         parse_opts(["XX --foo"], OptMaybe)),
     ?assertEqual({undefined, #{foo => d, bar => d}},
-        parse_opts([""], OptMaybe)).
+        parse_opts([""], OptMaybe)),
+    %% maybe arg - with no default given
+    ?assertEqual({undefined, #{foo => d, bar => "XX", baz => 0}},
+        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => int} | OptMaybe])).
 
 argparse() ->
     [{doc, "Tests examples from argparse Python library"}].
@@ -309,7 +340,7 @@ negative() ->
 
 negative(Config) when is_list(Config) ->
     Parser = #{options => [
-        #{name => x, short => $x, type => int},
+        #{name => x, short => $x, type => int, action => store},
         #{name => foo, nargs => maybe}
     ]},
     ?assertEqual({undefined, #{x => -1}}, parse("-x -1", Parser)),
@@ -327,8 +358,6 @@ negative(Config) when is_list(Config) ->
 
     %% negative number options present, so both -1s are options
     ?assertException(error, {missing_argument,undefined,one}, parse("-1 -1", Parser2)),
-    %usage: PROG [-h] [-1 ONE] [foo]
-    %PROG: error: argument -1: expected one argument
     ok.
 
 python_issue_15112() ->
@@ -344,20 +373,77 @@ python_issue_15112(Config) when is_list(Config) ->
     ?assertEqual({undefined, #{pos => "1", foo => "2", spam => 8, vars => ["8", "9"]}},
         parse("1 2 --spam 8 8 9", Parser)).
 
+subcommand() ->
+    [{doc, "Tests subcommands parser"}].
+
+subcommand(Config) when is_list(Config) ->
+    Cmd = #{
+        options => [#{name => force, type => boolean, short => $f}],
+        commands => #{one => #{
+            options => [#{name => foo, type => boolean, long => "-foo"}, #{name => baz}],
+            commands => #{
+                two => #{options => [#{name => bar}]}}}}},
+    %% don't need to match the path
+    {_, Opts} = parse("one N1O1O -f two --foo bar", Cmd),
+    ?assertEqual(#{force => true, baz => "N1O1O", foo => true, bar => "bar"}, Opts).
+
 error_format() ->
     [{doc, "Tests error output formatter"}].
 
 error_format(Config) when is_list(Config) ->
-    %% format
+    %% does not really require testing, but server well as contract,
+    %%  and good for coverage
+    ?assertEqual("invalid field commands for command: sub-commands must be a map",
+        make_error([""], #{commands => []})),
+    ?assertEqual("invalid field commands for command one: sub-commands must be a map",
+        make_error([""], #{commands => #{one => #{commands => []}}})),
+    ?assertEqual("invalid field commands for command one.two: sub-commands must be a map",
+        make_error([""], #{commands => #{one => #{commands => #{two => #{commands => []}}}}})),
+    ?assertEqual("invalid option name definition for command: option must be a map, with name := atom()",
+        make_error([""], #{options => [#{}]})),
+    %%
+    ?assertEqual("invalid option type definition for command: type is not supported",
+        make_error([""], #{options => [#{name => name, type => foo}]})),
+    ?assertEqual("invalid option args definition for command: 'nargs' is not valid",
+        make_error([""], #{options => [#{name => name, nargs => foo}]})),
+    ?assertEqual("invalid option action definition for command: action is not valid",
+        make_error([""], #{options => [#{name => name, action => foo}]})),
+    %% unknown arguments
+    ?assertEqual("error: unrecognized argument: arg", make_error(["arg"], #{})),
+    ?assertEqual("error: unknown option: -a", make_error(["-a"], #{})),
+    %% missing argument
+    ?assertEqual("error: required argument missing: need", make_error([""],
+        #{options => [#{name => need}]})),
+    ?assertEqual("error: required argument missing: need", make_error([""],
+        #{options => [#{name => need, short => $n, required => true}]})),
+    %% invalid value
+    ?assertEqual("error: invalid argument foo for: need", make_error(["foo"],
+        #{options => [#{name => need, type => int}]})),
+    ?assertEqual("error: invalid argument cAnNotExIsT for: need", make_error(["cAnNotExIsT"],
+        #{options => [#{name => need, type => atom}]})),
     ok.
 
-%format_error({invalid_command, Path, Text}) ->
-%    lists:flatten(io_lib:format("~p invalid command (~s)", [Path, Text]));
-%format_error({invalid_option, Path, Text, Option}) ->
-%    lists:flatten(io_lib:format("~p invalid option ~p (~s)", [Path, Option, Text]));
-%format_error({unknown_option, Path, Argument}) ->
-%    lists:flatten(io_lib:format("~p unknown option ~s", [Path, Argument]));
-%format_error({missing_argument, Path, Option}) ->
-%    lists:flatten(io_lib:format("~p missing option ~s", [Path, Option]));
-%format_error({invalid_argument, Path, Option, Value}) ->
-%    lists:flatten(io_lib:format("~p invalid option ~s (~p)", [Path, Option, Value])).
+very_short() ->
+    [{doc, "Tests short option appended to the optional itself"}].
+
+very_short(Config) when is_list(Config) ->
+    ?assertEqual({undefined, #{x => "V"}},
+        parse("-xV", #{options => [#{name => x, short => $x}]})).
+
+multi_short() ->
+    [{doc, "Tests multiple short arguments blend into one"}].
+
+multi_short(Config) when is_list(Config) ->
+    %% ensure non-flammable argument does not explode, even when it's possible
+    ?assertException(error, {missing_argument,undefined,x},
+        parse("-vxv", #{options => [#{name => v, short => $v, action => count}, #{name => x, short => $x}]})),
+    %% ensure 'verbosity' use-case works
+    ?assertEqual({undefined, #{v => 3}},
+        parse("-vvv", #{options => [#{name => v, short => $v, action => count}]})),
+    %%
+    ?assertEqual({undefined, #{recursive => true, force => true, path => "dir"}},
+        parse("-rf dir", #{options => [
+            #{name => recursive, short => $r, type => boolean},
+            #{name => force, short => $f, type => boolean},
+            #{name => path}
+            ]})).
