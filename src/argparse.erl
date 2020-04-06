@@ -1,21 +1,37 @@
 %%%-------------------------------------------------------------------
-%%% @author Maxim Fedorov
-%%% @copyright (C) 2019, Maxim Fedorov
+%%% @copyright (C) 2020, Maxim Fedorov <maximfca@mail.com>
 %%% @doc
 %%% Command line parser, made with hierarchy of commands in mind.
 %%%
 %%% Inspired by Python argparse library.
 %%% Known incompatibilities:
-%%%  * boolean type support, that does not require {store, true},
-%%%     yet still consuming true/false argument from command line,
-%%%     if it is there
+%%%  * boolean flag (option), automatically using {store, true}
+%%%  * all positional arguments are required by default (even 'maybe')
+%%%  * first-class (sub) commands, slightly differently from argparse
 %%%
-%%% TODO: usage/help
-%%% TODO: add abbreviated support (shortened long forms)
-%%% TODO: 'choices' validation
-%%% TODO: add shell auto-complete
-%%% Explore: support "--arg=value" form
-%%% Explore: support "--no-XXXX" form for booleans
+%%% Commands vs. positional arguments: command always takes precedence
+%%%  over positional argument.
+%%% Commands form exclusive groups, e.g. only one command can
+%%%  be followed at a time.
+%%%
+%%% Kinds of arguments supported:
+%%%  * command (priority positional argument) : ectl {crawler|reader|writer}
+%%%  * command, and sub-command:                ectl crawler {start|stop|check}
+%%%  * positional argument (required):          ectl <arg1> <arg2>
+%%%  * positional argument (with default):      ectl [<arg1>]
+%%%
+%%%  * boolean flag:              ectl [-rf]
+%%%  * required flag:             ectl -r
+%%%  * short optional argument:   ectl [-i <int>]
+%%%  * short optional:            ectl [-i [<int>]]
+%%%  * required short option:     ectl -i <int>
+%%%  * long option flag:          ectl [--foo]
+%%%  * long optional argument:    ectl [--foo <arg>]
+%%%  * required long:             ectl --foo <arg>
+%%%  * list of arguments:         ectl <arg>, ...
+%%%
+%%% Help conventions follow Unix Utility Argument Syntax:
+%%%  utility_name [-abcDxyz][-p arg][operand]
 %%%
 %%% @end
 %%%
@@ -25,8 +41,12 @@
 
 -export([
     validate/1,
+    validate/2,
     parse/2,
-    format_error/1
+    parse/3,
+    help/2,
+    format_error/1,
+    format_error/2
 ]).
 
 %%--------------------------------------------------------------------
@@ -34,54 +54,60 @@
 
 -compile(warn_missing_spec).
 
+%% @doc
 %% Built-in types include basic validation abilities
-%% May allow to create new atoms (not the default)
-%% Custom conversion is also allowed.
+%% String and binary validation may use regex match (ignoring captured value).
 -type arg_type() :: boolean |
     float | {float, [{min, float()} | {max, float()}]} |
     int | {int, [{min, integer()} | {max, integer()}]} |
     string | {string, string()} | {string, string(), [term()]} |
     binary | {binary, binary()} | {binary, binary(), [term()]} |
-    atom | {atom, create} |
+    atom | {atom, unsafe} |
     {custom, fun((string()) -> term())}.
 
 %% Command line argument specification.
 %% Argument can be optional - starting with - (dash), and positional.
 -type argument() :: #{
     %% Argument name, and a destination to store value too
-    %% It is allowed to have several arguments named the same, setting or appending to the same variable
-    name := atom(),
+    %% It is allowed to have several arguments named the same, setting or appending to the same variable.
+    %% General recommendation is to use atom() for name.
+    name := term(),
 
     %% short, single-character variant of command line option, omitting dash (example: $b, meaning -b),
-    %%  when set, this is optional argument
+    %%  when present, this is optional argument
     short => char(),
 
     %% long command line option, omitting first dash (example: "kernel", or "-long", meaning "-kernel" and "--long"
     %% long command always wins over short abbreviation (e.g. -kernel is considered before -k -e -r -n -e -l)
-    %%  when set, this is optional argument
+    %%  when present, this is optional argument
     long => string(),
 
-    %% produces an error if option was not present in command line
+    %% throws an error if value is not present in command line
     required => true,
 
-    %% default value, attached if it's not found in a command line
+    %% default value, produced if value is not present in command line
     default => term(),
 
     %% parameter type (string by default)
     type => arg_type(),
 
     %% action to take when argument is matched
-    action => store | {store, term()} | append | {append, term()} | count | extend,
+    action => store |       %% default: store argument consumed (last stored wins)
+        {store, term()} |   %% does not consume argument, stores term() instead
+        append |            %% appends consumed argument to a list
+        {append, term()} |  %% does not consume an argument, appends term() to a list
+        count |             %% does not consume argument, bumps counter
+        extend,             %% uses when nargs is list/nonempty_list/all - appends every element to the list
 
-    %% how many positional arguments to consume when option is matched
+    %% how many positional arguments to consume
     nargs =>
-        pos_integer() | %% consume exactly this amount, e.g. '-kernel key value' #{long => "-kernel", args => 2}
-                        %%  returns #{kernel => ["key", "value"]}
-        maybe |         %% same as '?' with no const defined
-        {maybe, term()} |   %% same as '?' with const = term()
-        list |          %% "*"
-        nonempty_list | %% "+"
-        all,            %% remainder
+        pos_integer() |     %% consume exactly this amount, e.g. '-kernel key value' #{long => "-kernel", args => 2}
+                            %%      returns #{kernel => ["key", "value"]}
+        maybe |             %% if next argument is positional, consume it, otherwise produce default
+        {maybe, term()} |   %% if next argument is positional, consume it, otherwise produce term()
+        list |              %% consume zero or more positional arguments, until next optional
+        nonempty_list |     %% consume at least one positional argument, until next optional
+        all,                %% fold remaining command line into this argument
 
     %% help string printed in usage
     help => string()
@@ -89,55 +115,33 @@
 
 %% Arguments map: argument name to a term, produced by parser.
 %% Supplied to command handler
--type arg_map() :: #{atom() => term()}.
+-type arg_map() :: #{term() => term()}.
 
-%% Command handler. May produce some output!
+%% Command handler. May produce some output.
 -type handler() :: fun((arg_map()) -> term()).
 
-%% Custom function to merge output returned by multi-destination command.
--type output_merge_fun() :: fun (([term()]) -> term()).
+%% Sub-commands are arranged into maps (cannot start with prefix)
+-type command_map() :: #{string() => command()}.
 
-%% Command line call specification. May contain sub-commands and/or options.
-%% Match algorithm:
-%%  - if it is optional argument (starting with -), look for all available
-%%      optional argument descriptions in the command stack, error if not found,
-%%      and optional argument starting with single '-' cannot be converted to
-%%      a negative number (in this case it is assumed to be positional argument)
-%%  - positional argument: try to match sub-command name,  otherwise
-%%      treat as positional argument
-%%
-%% Sub-commands are arranged into maps.
-%% Command with empty atom name '' serves as catch-all command.
--type parser_map() :: #{atom() => parser()}.
+%% Command descriptor
+-type command() :: #{
+    %% Sub-commands
+    commands => command_map(),
 
--type parser() :: #{
-    %% Sub-parsers
-    commands => parser_map(),
+    %% accepted arguments list. Positional order is important!
+    arguments => [argument()],
 
-    %% Custom handler function. Default is Mod:Name where Mod is
-    %%  module exporting ectl beaviour, and Name is command name
-    handler => handler(),
-
-    %% Remote call handling, global/scoped execution
-    % Local is 'extra remote calls not allowed',
-    %   global is 'use default result merge behaviour',
-    %   otherwise merge() fun is supplied that should
-    %   implement custom response merging logic
-    %% NOT IMPLEMENTED - add it for your own convenience
-    global => local | global | output_merge_fun(),
-
-    %% help line reported by usage()
+    %% help line
     help => string(),
 
-    %% accepted options list. Positional order is important!
-    options => [argument()]
+    %% recommended handler function, cli behaviour deduces handler from
+    %%  command name and module implementing cli behaviour
+    handler => handler()
 }.
-
--type cmd_path() :: [{atom(), parser()}].
 
 -export_type([
     argument/0,
-    parser/0,
+    command/0,
     handler/0,
     cmd_path/0,
     arg_map/0
@@ -145,316 +149,454 @@
 
 %% Optional or positional argument?
 -define(IS_OPTIONAL(Arg), is_map_key(short, Arg) orelse is_map_key(long, Arg)).
--define(IS_POSITIONAL(Arg), not (is_map_key(short, Arg) orelse is_map_key(long, Arg))).
+-define(IS_POSITIONAL(Arg), not ?IS_OPTIONAL(Arg)).
+
+%% Command path, for deeply nested sub-commands
+-type cmd_path() :: [string()].
 
 %% Parser state (not available via API)
 -record(eos, {
-    %% matched arguments map
+    %% prefix character map, by default, only -
+    prefixes :: #{integer() => true},
+    %% argument map to be returned
     argmap = #{} :: arg_map(),
-    %% collected command path
-    path :: undefined | cmd_path(),
-    %% unmatched positional arguments encountered on the path
+    %% sub-commands, in reversed orders, allowing to recover path taken
+    commands = [] :: cmd_path(),
+    %% command being matched
+    current :: command(),
+    %% unmatched positional arguments, in expected match order
     pos = [] :: [argument()],
-    %% all optional arguments encountered on the path
-    opt = [] :: [argument()]
+    %% expected optional arguments, mapping between short/long form and an argument
+    short = #{} :: #{integer() => argument()},
+    long = #{} :: #{string() => argument()},
+    %% flag, whether there are no options that can be confused with negative numbers
+    no_digits = true :: boolean()
 }).
 
 %% Error Reason thrown by parser (feed it into format_error to get human-readable error).
--type error() ::
+-type argparse_reason() ::
     {invalid_command, cmd_path(), Field :: atom(), Reason :: string()} |
-    {invalid_option, cmd_path(), argument(), Field :: atom(), Reason :: string()} |
-    {unknown_option, cmd_path(), Argument :: string()} |
+    {invalid_option, cmd_path(), Name :: string(), Field :: atom(), Reason :: string()} |
+    {unknown_argument, cmd_path(), Argument :: string()} |
     {missing_argument, cmd_path(), argument()} |
     {invalid_argument, cmd_path(), argument(), Argument :: string()}.
 
+%% Parser options
+-type parser_options() :: #{
+    %% allowed prefixes (default is [$-]).
+    prefixes => [integer()]
+}.
+
+%% Command name with command spec
+-type command_spec() :: {Name :: string(), command()}.
+
+%% Result returned from parse/2,3: can be only argument map,
+%%  or argument map with command_spec.
+-type parse_result() :: arg_map() | {arg_map(), command_spec()}.
+
 %% @doc
-%% Validates command specification, throws if there is an error, and
-%%  returns canonical specification.
--spec validate(parser()) -> parser().
+%% Validates command specification, throws if there is an error.
+%% Returns program name (from init:get_argument(progname)) with
+%%  canonical command.
+-spec validate(command()) -> command_spec().
 validate(Command) ->
-    validate_command([{undefined, Command}]).
+    validate(Command, #{}).
+
+-spec validate(command(), parser_options()) -> command_spec().
+validate(Command, Options) ->
+    validate_impl(Command, Options).
 
 %% @doc
 %% Parses supplied arguments according to expected command definition.
-%% Returns reversed list of commands parsed.
--spec parse(Args :: [string()], parser()) -> {cmd_path() | undefined, arg_map()}.
+-spec parse(Args :: [string()], command() | command_spec()) -> parse_result().
 parse(Args, Command) ->
-    parse_impl(Args, validate(Command), add_opts(maps:get(options, Command, []), #eos{})).
+    parse(Args, Command, #{}).
 
-%% Format exceptions produced by parse/2
--spec format_error(error()) -> string().
+%% @doc
+%% Parses supplied arguments, with additional options specified.
+-spec parse(Args :: [string()], command() | command_spec(),
+    Options :: parser_options()) -> parse_result.
+parse(Args, Command, Options) ->
+    {Prog, Cmd} = validate(Command, Options),
+    Prefixes = maps:from_list([{P, true} || P <- maps:get(prefixes, Options, [$-])]),
+    parse_impl(Args, merge_arguments(Prog, Cmd, #eos{prefixes = Prefixes})).
+
+%% By default, options are indented with 2 spaces for each level of
+%%  sub-command.
+-define (DEFAULT_INDENT, "  ").
+
+%% Help format options
+-type help_options() :: #{
+    progname => string(),   %% program name override
+    indent => string(),     %% original indent (none by default)
+    indent_next => string() %% add this to next indent, DEFAULT_INDENT is default
+}.
+
+%% @doc
+%% Returns help for Command formatted according to Options specified
+-spec help(command() | command_spec(), help_options()) -> string().
+help(Command, Options) ->
+    format_help(Options#{
+        indent => maps:get(indent, Options, ""),
+        indent_next => maps:get(indent_next, Options, ?DEFAULT_INDENT)
+        }, validate(Command, Options)).
+
+%% @doc
+%% Format exception reasons produced by parse/2.
+%% Exception of class error with reason {argparse, Reason} is normally
+%%  raised, and format_error accepts only the Reason part, leaving
+%%  other exceptions that do not belong to argparse out.
+-spec format_error(argparse_reason()) -> string().
 format_error({invalid_command, Path, Field, Text}) ->
-    lists:flatten(io_lib:format("invalid field ~s for command~s: ~s", [Field, format_path(Path), Text]));
-format_error({invalid_option, Path, _Option, Name, Text}) ->
-    lists:flatten(io_lib:format("invalid option ~s definition for command~s: ~s",
-        [Name, format_path(Path), Text]));
-format_error({unknown_option, Path, [$- | _] = Argument}) ->
-    lists:flatten(io_lib:format("error~s: unknown option: ~s", [format_path(Path), Argument]));
-format_error({unknown_option, Path, Argument}) ->
-    lists:flatten(io_lib:format("error~s: unrecognized argument: ~s", [format_path(Path), Argument]));
+    lists:flatten(io_lib:format("~sinternal error, invalid field '~s': ~s~n",
+        [format_path(Path), Field, Text]));
+format_error({invalid_option, Path, Name, Field, Text}) ->
+    lists:flatten(io_lib:format("~sinternal error, option ~s field '~s': ~s~n",
+        [format_path(Path), Name, Field, Text]));
+format_error({unknown_argument, Path, Argument}) ->
+    lists:flatten(io_lib:format("~sunrecognised argument: ~s~n",
+        [format_path(Path), Argument]));
 format_error({missing_argument, Path, Name}) ->
-    lists:flatten(io_lib:format("error~s: required argument missing: ~s", [format_path(Path), Name]));
+    lists:flatten(io_lib:format("~srequired argument missing: ~s~n",
+        [format_path(Path), Name]));
 format_error({invalid_argument, Path, Name, Value}) ->
-    lists:flatten(io_lib:format("error~s: invalid argument ~s for: ~s", [format_path(Path), Value, Name])).
+    lists:flatten(io_lib:format("~sinvalid argument ~s for: ~s~n",
+        [format_path(Path), Value, Name])).
+
+%% @doc
+%% Formats exception, and adds command usage information for
+%%  command that was known/parsed when exception was raised.
+-spec format_error(argparse_reason(), command() | command_spec()) -> string().
+format_error(Reason, Command) ->
+    Path = element(2, Reason),
+    ErrorText = format_error(Reason),
+    UsageText = help(#{path => Path}, Command),
+    ErrorText ++ UsageText.
 
 %%--------------------------------------------------------------------
-%% Internal implementation
+%% Parser implementation
 
-%% Option starting with "-"
-parse_impl([[$- | Optname] = Optional | Tail], Current, #eos{opt = Opt} = Eos) ->
-    case find_option(Optname, Opt, Opt) of
-        {short, OptVal} ->
-            consume(Tail, Current, OptVal, Eos);
-        {very_short, OptVal, Add} ->
-            consume([Add | Tail], Current, OptVal, Eos);
-        {long, OptVal} ->
-            consume(Tail, Current, OptVal, Eos);
-        {explode, Explode} ->
-            parse_impl(Explode ++ Tail, Current, Eos);
-        not_found ->
-            %% what if it's an integer, or float value?
-            case is_digits(Optional) andalso no_digits(Opt) of
-                true ->
-                    parse_positional(Optional, Tail, Current, Eos);
-                false ->
-                    error({unknown_option, Eos#eos.path, Optional})
+%% @private
+%% parse_impl implements entire internal parse logic.
+
+%% Claus: option starting with any prefix
+%% No separate clause for single-character short form, because there could be a single-character
+%%  long form taking precedence.
+parse_impl([[Prefix | Name] | Tail], #eos{prefixes = Pref} = Eos) when is_map_key(Prefix, Pref) ->
+    %% match "long" option from the list of currently known
+    case maps:find(Name, Eos#eos.long) of
+        {ok, Option} ->
+            consume(Tail, Option, Eos);
+        error ->
+            %% try to match single-character flag
+            case Name of
+                [Flag] when is_map_key(Flag, Eos#eos.short) ->
+                    %% found a flag
+                    consume(Tail, maps:get(Flag, Eos#eos.short), Eos);
+                [Flag | Rest] when is_map_key(Flag, Eos#eos.short) ->
+                    %% can be a combination of flags, or flag with value,
+                    %%  but can never be a negative integer, because otherwise
+                    %%  it will be reflected in no_digits
+                    case abbreviated(Name, [], Eos#eos.short) of
+                        false ->
+                            %% short option with Rest being an argument
+                            consume([Rest | Tail], maps:get(Flag, Eos#eos.short), Eos);
+                        Expanded ->
+                            %% expand multiple flags into actual list, adding prefix
+                            parse_impl([[Prefix,E] || E <- Expanded] ++ Tail, Eos)
+                    end;
+                MaybeNegative when Prefix =:= $-, Eos#eos.no_digits ->
+                    case is_digits(MaybeNegative) of
+                        true ->
+                            %% found a negative number
+                            parse_positional([Prefix|Name], Tail, Eos);
+                        false ->
+                            fail({unknown_argument, Eos#eos.commands, [Prefix|Name]})
+                    end;
+                _Unknown ->
+                    fail({unknown_argument, Eos#eos.commands, [Prefix|Name]})
             end
     end;
 
-%% Options not starting with "-": can be a sub-command, or a positional
-%%  argument.
-%% Next clause is for commands with sub-commands.
-parse_impl([Positional | Tail], #{commands := CmdMap} = Current, Eos) ->
-    try
-        %% command names are always atoms, so if it cannot be converted,
-        %%  it is not a command
-        ArgName = list_to_existing_atom(Positional),
-        case maps:find(ArgName, CmdMap) of
-            error ->
-                %% sub-command not found, try positional argument
-                parse_positional(Positional, Tail, Current, Eos);
-            {ok, #{options := AddOpt} = SubCmd} ->
-                %% found matching sub-command, descend into it
-                parse_impl(Tail, SubCmd, add_opts(AddOpt, add_cmd(ArgName, SubCmd, Eos)));
-            {ok, SubCmd} ->
-                %% found matching sub-command with no options, descend into it
-                parse_impl(Tail, SubCmd, add_cmd(ArgName, SubCmd, Eos))
-        end
-    catch
-        error:badarg ->
-            %% atom conversion failed, it can never be a sub-command
-            parse_positional(Positional, Tail, Current, Eos)
+%% Arguments not starting with Prefix: attempt to match sub-command, if available
+parse_impl([Positional | Tail], #eos{current = #{commands := SubCommands}} = Eos) ->
+    case maps:find(Positional, SubCommands) of
+        error ->
+            %% sub-command not found, try positional argument
+            parse_positional(Positional, Tail, Eos);
+        {ok, SubCmd} ->
+            %% found matching sub-command with arguments, descend into it
+            parse_impl(Tail, merge_arguments(Positional, SubCmd, Eos))
     end;
 
-%% Clause for options that don't have sub-commands (hence, it must be
+%% Clause for arguments that don't have sub-commands (therefore check for
 %%  positional argument).
-parse_impl([Positional | Tail], Current, Eos) ->
-    parse_positional(Positional, Tail, Current, Eos);
+parse_impl([Positional | Tail], Eos) ->
+    parse_positional(Positional, Tail, Eos);
 
-%% no more arguments left, go verify no required option is missing, and set up default
-%%  values for those aren't provided
-parse_impl([], Current, #eos{path = Path, argmap = ArgMap, opt = Opts, pos = Pos}) ->
-    %% error out for any 'required' argument
-    %% by default, all positional arguments are required, unless they
-    %%  have required => false, or nargs set
-    [error({missing_argument, Path, OptName}) ||
-        Opt = #{name := OptName} <- Opts ++ Pos,
-        is_map_key(OptName, ArgMap) =:= false,      %% argument is not present in the output map
-        (maps:get(required, Opt, false) =:= true    %% required explicitly set to true
-            orelse (not is_map_key(nargs, Opt) andalso ?IS_POSITIONAL(Opt)))  %% or not set for positional that does not have nargs
-    ],
-    %% blend in default values, when known, for all items in the Path
-    {Path, blend_default(Path, Current, ArgMap)}.
+%% Entire command line has been matched, go over missing arguments,
+%%  add defaults etc
+parse_impl([], #eos{argmap = ArgMap0, pos = Pos} = Eos) ->
+    %% go over remaining positional, verify they are all not required
+    ArgMap1 = fold_args_map(Eos#eos.commands, true, ArgMap0, Pos),
+    %% go over optionals, and either raise an error, or set default
+    ArgMap2 = fold_args_map(Eos#eos.commands, false, ArgMap1, maps:values(Eos#eos.short)),
+    ArgMap3 = fold_args_map(Eos#eos.commands, false, ArgMap2, maps:values(Eos#eos.long)),
+    case Eos#eos.commands of
+        [_] ->
+            %% if there were no commands specified, only the argument map
+            ArgMap3;
+        [_|_] ->
+            %% otherwise return argument map, command path taken, and the
+            %%  last command matched (usually it contains a handler to run)
+            {ArgMap3, {hd(Eos#eos.commands), Eos#eos.current}}
+    end.
 
-blend_default(undefined, Current, ArgMap) ->
-    blend_default([Current], undefined, ArgMap);
-blend_default(Path, _Current, ArgMap) ->
+%% @private
+%% Generate error for missing required argument, and supply defaults for
+%%  missing optional arguments that have defaults.
+fold_args_map(Commands, Req, ArgMap, Args) ->
     lists:foldl(
-        fun (#{options := DefOpts}, Acc) ->
-            lists:foldl(
-                fun (#{name := Name, default := Def}, AccIn)
-                    when not is_map_key(Name, AccIn) ->
-                    AccIn#{Name => Def};
-                    (_, AccIn) ->
-                        AccIn
-                end, Acc, DefOpts);
-            (_, Acc) ->
+        fun (#{name := Name} = Opt, Acc) when is_map_key(Name, Acc); map_get(required, Opt) =:= false ->
+                %% argument present, or explicitly not required
+                Acc;
+            (#{name := Name, required := true}, _Acc) ->
+                %% missing, and required explicitly
+                fail({missing_argument, Commands, Name});
+            (#{name := Name, default := Default}, Acc) when Req =:= true ->
+                %% positional argument with default
+                Acc#{Name => Default};
+            (#{name := Name}, _Acc) when Req =:= true ->
+                %% missing, for positional argument, implicitly required
+                fail({missing_argument, Commands, Name});
+            (#{name := Name, default := Default}, Acc) ->
+                %% missing, optional, and there is a default
+                Acc#{Name => Default};
+            (_Opt, Acc) ->
+                %% missing, optional, no default - don't populate
                 Acc
-        end, ArgMap, Path).
-
-%% adds subcommand to path
-add_cmd(CmdName, CmdSpec, #eos{path = undefined} = Eos) ->
-    Eos#eos{path = [{CmdName, CmdSpec}]};
-add_cmd(CmdName, CmdSpec, #eos{path = Path} = Eos) ->
-    Eos#eos{path = [{CmdName, CmdSpec} | Path]}.
-
-%% adds options into current set of discovered options, in a reverse
-%%  order for optional, and forward order for positional (as it's important)
-add_opts([], Eos) ->
-    Eos;
-add_opts([Option | Tail], #eos{opt = Opt} = Eos) when is_map_key(short, Option); is_map_key(long, Option) ->
-    add_opts(Tail, Eos#eos{opt = [Option | Opt]});
-add_opts([PosOpt | Tail], #eos{pos = Pos} = Eos) ->
-    add_opts(Tail, Eos#eos{pos = Pos ++ [PosOpt]}).
-
-%% Finds spec that matches optional argument passed in
-find_option(_Arg, [], _) ->
-    not_found;
-%% shortcut for long option first
-find_option(Arg, [Opt | _Tail], _) when map_get(long, Opt) =:= Arg ->
-    {long, Opt};
-find_option([Short], [Opt | _Tail], _) when map_get(short, Opt) =:= Short ->
-    {short, Opt};
-find_option([Short|Very] = Arg, [Opt | _Tail], AllOpts) when map_get(short, Opt) =:= Short ->
-    %% single optional can be a cluster of many optionals,
-    %%  if only the last one requires an argument
-    AllShorts = [S || #{short := S} <- AllOpts],
-    case [C || C <- Arg, not lists:member(C, AllShorts)] of
-        [] ->
-            {explode, [[$-,C] || C <- Arg]};
-        _ ->
-            {very_short, Opt, Very}
-    end;
-find_option(Arg, [_ | Tail], AllOpts) ->
-    find_option(Arg, Tail, AllOpts).
+        end, ArgMap, Args).
 
 %%--------------------------------------------------------------------
-%% positional argument for all commands in the stack
+%% argument consumption (nargs) handling
 
-parse_positional(Arg, _Tail, _Current, #eos{pos = [], path = Path}) ->
-    %% no match for positional argument supplied, and no sub-command either
-    error({unknown_option, Path, Arg});
-parse_positional(Arg, Tail, Current, #eos{pos = Pos} = Eos) ->
+parse_positional(Arg, _Tail, #eos{pos = [], commands = Commands}) ->
+    fail({unknown_argument, Commands, Arg});
+parse_positional(Arg, Tail, #eos{pos = Pos} = Eos) ->
     %% positional argument itself is a value
-    consume([Arg | Tail], Current, hd(Pos), Eos).
+    consume([Arg | Tail], hd(Pos), Eos).
+
+%% @private
+%% Adds CmdName to path, and includes any arguments found there
+merge_arguments(CmdName, #{arguments := Args} = SubCmd, Eos) ->
+    add_args(Args, Eos#eos{current = SubCmd, commands = [CmdName | Eos#eos.commands]});
+merge_arguments(CmdName, SubCmd, Eos) ->
+    Eos#eos{current = SubCmd, commands = [CmdName | Eos#eos.commands]}.
+
+%% @private
+%% adds arguments into current set of discovered pos/opts
+add_args([], Eos) ->
+    Eos;
+add_args([#{short := S, long := L} = Option | Tail], #eos{short = Short, long = Long} = Eos) ->
+    %% remember if this option can be confused with negative number
+    NoDigits = no_digits(Eos#eos.no_digits, Eos#eos.prefixes, S, L),
+    add_args(Tail, Eos#eos{short = Short#{S => Option}, long = Long#{L => Option}, no_digits = NoDigits});
+add_args([#{short := S} = Option | Tail], #eos{short = Short} = Eos) ->
+    %% remember if this option can be confused with negative number
+    NoDigits = no_digits(Eos#eos.no_digits, Eos#eos.prefixes, S, 0),
+    add_args(Tail, Eos#eos{short = Short#{S => Option}, no_digits = NoDigits});
+add_args([#{long := L} = Option | Tail], #eos{long = Long} = Eos) ->
+    %% remember if this option can be confused with negative number
+    NoDigits = no_digits(Eos#eos.no_digits, Eos#eos.prefixes, 0, L),
+    add_args(Tail, Eos#eos{long = Long#{L => Option}, no_digits = NoDigits});
+add_args([PosOpt | Tail], #eos{pos = Pos} = Eos) ->
+    add_args(Tail, Eos#eos{pos = Pos ++ [PosOpt]}).
+
+%% @private
+%% If no_digits is still true, try to find out whether it should turn false,
+%%  because added options look like negative numbers, and prefixes include -
+no_digits(false, _, _, _) ->
+    false;
+no_digits(true, Prefixes, _, _) when not is_map_key($-, Prefixes) ->
+    true;
+no_digits(true, _, Short, _) when Short >= $0, Short =< $9 ->
+    false;
+no_digits(true, _, _, Long) ->
+    not is_digits(Long).
+
+%%--------------------------------------------------------------------
+%% additional functions for optional arguments processing
+
+%% @private
+%% Returns true when option (!) description passed required a positional argument
+%% Argument required when: nargs is positive, or nonempty_list, or
+%%  nargs is not set, and action is store/append/not_set for a non-boolean type.
+requires_argument(#{nargs := nonempty_list}) ->
+    true;
+requires_argument(#{nargs := Count}) when is_integer(Count) ->
+    true;
+requires_argument(#{nargs := _Any}) ->
+    false;
+requires_argument(Opt) ->
+    case maps:get(action, Opt, store) of
+        store ->
+            maps:get(type, Opt, string) =/= boolean;
+        append ->
+            maps:get(type, Opt, string) =/= boolean;
+        _ ->
+            false
+    end.
+
+%% @private
+%% Attempts to find if passed list of flags can be expanded
+abbreviated([Last], Acc, AllShort) when is_map_key(Last, AllShort) ->
+    lists:reverse([Last | Acc]);
+abbreviated([_], _Acc, _Eos) ->
+    false;
+abbreviated([Flag | Tail], Acc, AllShort) ->
+    case maps:find(Flag, AllShort) of
+        error ->
+            false;
+        {ok, Opt} ->
+            case requires_argument(Opt) of
+                true ->
+                    false;
+                false ->
+                    abbreviated(Tail, [Flag | Acc], AllShort)
+            end
+    end.
 
 %%--------------------------------------------------------------------
 %% argument consumption (nargs) handling
 
 %% consume predefined amount (none of which can be an option?)
-consume(Tail, Current, #{nargs := Count} = Opt, Eos) when is_integer(Count) ->
-    {Consumed, Remain} = split_to_option(Tail, Count, Eos#eos.opt, []),
-    length(Consumed) < Count andalso error({invalid_argument, Eos#eos.path, maps:get(name, Opt), Tail}),
-    action(Remain, Current, Consumed, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
+consume(Tail, #{nargs := Count} = Opt, Eos) when is_integer(Count) ->
+    {Consumed, Remain} = split_to_option(Tail, Count, Eos, []),
+    length(Consumed) < Count andalso fail({invalid_argument, Eos#eos.commands, maps:get(name, Opt), Tail}),
+    action(Remain, Consumed, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
 
 %% handle 'reminder' by just dumping everything in
-consume(Tail, Current, #{nargs := all} = Opt, Eos) ->
-    action([], Current, Tail, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
+consume(Tail, #{nargs := all} = Opt, Eos) ->
+    action([], Tail, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
 
 %% require at least one argument
-consume(Tail, Current, #{nargs := nonempty_list} = Opt, Eos) ->
-    {Consumed, Remains} = split_to_option(Tail, -1, Eos#eos.opt, []),
-    Consumed =:= [] andalso error({invalid_argument, Eos#eos.path, maps:get(name, Opt), Tail}),
-    action(Remains, Current, Consumed, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
+consume(Tail, #{nargs := nonempty_list} = Opt, Eos) ->
+    {Consumed, Remains} = split_to_option(Tail, -1, Eos, []),
+    Consumed =:= [] andalso fail({invalid_argument, Eos#eos.commands, maps:get(name, Opt), Tail}),
+    action(Remains, Consumed, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
 
 %% consume all until next option
-consume(Tail, Current, #{nargs := list} = Opt, Eos) ->
-    {Consumed, Remains} = split_to_option(Tail, -1, Eos#eos.opt, []),
-    action(Remains, Current, Consumed, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
+consume(Tail, #{nargs := list} = Opt, Eos) ->
+    {Consumed, Remains} = split_to_option(Tail, -1, Eos, []),
+    action(Remains, Consumed, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
 
 %% maybe consume one, maybe not...
 %% special cases for 'boolean maybe', only consume 'true' and 'false'
-consume(["true" | Tail], Current, #{type := boolean} = Opt, Eos) ->
-    action(Tail, Current, true, Opt#{type => raw}, Eos);
-consume(["false" | Tail], Current, #{type := boolean} = Opt, Eos) ->
-    action(Tail, Current, false, Opt#{type => raw}, Eos);
-consume(Tail, Current, #{type := boolean} = Opt, Eos) ->
+consume(["true" | Tail], #{type := boolean} = Opt, Eos) ->
+    action(Tail, true, Opt#{type => raw}, Eos);
+consume(["false" | Tail], #{type := boolean} = Opt, Eos) ->
+    action(Tail, false, Opt#{type => raw}, Eos);
+consume(Tail, #{type := boolean} = Opt, Eos) ->
     %% if neither true or false, don't consume, just do the action with 'true' as arg
-    action(Tail, Current, true, Opt#{type => raw}, Eos);
+    action(Tail, true, Opt#{type => raw}, Eos);
 
 %% maybe behaviour, as '?'
-consume(Tail, Current, #{nargs := maybe} = Opt, Eos) ->
-    case split_to_option(Tail, 1, Eos#eos.opt, []) of
+consume(Tail, #{nargs := maybe} = Opt, Eos) ->
+    case split_to_option(Tail, 1, Eos, []) of
         {[], _} ->
             %% no argument given, produce default argument (if not present,
             %%  then produce default value of the specified type)
-            action(Tail, Current, default(Opt), Opt#{type => raw}, Eos);
+            action(Tail, default(Opt), Opt#{type => raw}, Eos);
         {[Consumed], Remains} ->
-            action(Remains, Current, Consumed, Opt, Eos)
+            action(Remains, Consumed, Opt, Eos)
     end;
 
 %% maybe consume one, maybe not...
-consume(Tail, Current, #{nargs := {maybe, Const}} = Opt, Eos) ->
-    case split_to_option(Tail, 1, Eos#eos.opt, []) of
+consume(Tail, #{nargs := {maybe, Const}} = Opt, Eos) ->
+    case split_to_option(Tail, 1, Eos, []) of
         {[], _} ->
-            action(Tail, Current, Const, Opt, Eos);
+            action(Tail, Const, Opt, Eos);
         {[Consumed], Remains} ->
-            action(Remains, Current, Consumed, Opt, Eos)
+            action(Remains, Consumed, Opt, Eos)
     end;
 
 %% default case, which depends on action
-consume(Tail, Current, #{action := count} = Opt, Eos) ->
-    action(Tail, Current, undefined, Opt, Eos);
+consume(Tail, #{action := count} = Opt, Eos) ->
+    action(Tail, undefined, Opt, Eos);
 
 %% for {store, ...} and {append, ...} don't take argument out
-consume(Tail, Current, #{action := {Act, _Const}} = Opt, Eos) when Act =:= store; Act =:= append ->
-    action(Tail, Current, undefined, Opt, Eos);
+consume(Tail, #{action := {Act, _Const}} = Opt, Eos) when Act =:= store; Act =:= append ->
+    action(Tail, undefined, Opt, Eos);
 
 %% optional: ensure not to consume another option start
-consume([[$- | _] =ArgValue | Tail], Current, Opt, Eos) when ?IS_OPTIONAL(Opt) ->
-    case is_digits(ArgValue) andalso no_digits(Eos#eos.opt) of
+consume([[Prefix | _] = ArgValue | Tail], Opt, Eos) when ?IS_OPTIONAL(Opt), is_map_key(Prefix, Eos#eos.prefixes) ->
+    case Eos#eos.no_digits andalso is_digits(ArgValue) of
         true ->
-            action(Tail, Current, ArgValue, Opt, Eos);
+            action(Tail, ArgValue, Opt, Eos);
         false ->
-            error({missing_argument, Eos#eos.path, maps:get(name, Opt)})
+            fail({missing_argument, Eos#eos.commands, maps:get(name, Opt)})
     end;
 
-consume([ArgValue | Tail], Current, Opt, Eos) when ?IS_OPTIONAL(Opt) ->
-    action(Tail, Current, ArgValue, Opt, Eos);
+consume([ArgValue | Tail], Opt, Eos) when ?IS_OPTIONAL(Opt) ->
+    action(Tail, ArgValue, Opt, Eos);
 
 %% positional: just consume one, no 'maybe' behaviour
-consume([ArgValue | Tail], Current, Opt, Eos) ->
+consume([ArgValue | Tail], Opt, Eos) ->
     %% for positionals, strip the matched one now
-    action(Tail, Current, ArgValue, Opt, Eos#eos{pos = tl(Eos#eos.pos)}).
+    action(Tail, ArgValue, Opt, Eos#eos{pos = tl(Eos#eos.pos)}).
 
 %% no more arguments for consumption, but last optional may still be action-ed
 %%consume([], Current, Opt, Eos) ->
 %%    action([], Current, undefined, Opt, Eos).
 
-%% smart split: ignore options that can be parsed as negative numbers,
-%%  unless there are options that look like negative numbers
-split_to_option([], _, _Opts, Acc) ->
+%% smart split: ignore arguments that can be parsed as negative numbers,
+%%  unless there are arguments that look like negative numbers
+split_to_option([], _, _Eos, Acc) ->
     {lists:reverse(Acc), []};
-split_to_option(Rem, 0, _Opts, Acc) ->
-    {lists:reverse(Acc), Rem};
-split_to_option([[$- | _] = MaybeNumber | Tail] = All, Left, Opts, Acc) ->
-    case is_digits(MaybeNumber) andalso no_digits(Opts) of
+split_to_option(Tail, 0, _Eos, Acc) ->
+    {lists:reverse(Acc), Tail};
+split_to_option([[Prefix | _] = MaybeNumber | Tail] = All, Left,
+    #eos{no_digits = true, prefixes = Prefixes} = Eos, Acc) when is_map_key(Prefix, Prefixes) ->
+    case is_digits(MaybeNumber) of
         true ->
-            split_to_option(Tail, Left - 1, Opts, [MaybeNumber | Acc]);
+            split_to_option(Tail, Left - 1, Eos, [MaybeNumber | Acc]);
         false ->
             {lists:reverse(Acc), All}
     end;
+split_to_option([[Prefix | _] | _] = All, _Left,
+    #eos{no_digits = false, prefixes = Prefixes}, Acc) when is_map_key(Prefix, Prefixes) ->
+    {lists:reverse(Acc), All};
 split_to_option([Head | Tail], Left, Opts, Acc) ->
     split_to_option(Tail, Left - 1, Opts, [Head | Acc]).
 
 %%--------------------------------------------------------------------
 %% Action handling
 
-action(Tail, CmdMap, ArgValue, #{name := ArgName, action := set} = Opt, #eos{argmap = ArgMap} = Eos) ->
+action(Tail, ArgValue, #{name := ArgName, action := set} = Opt, #eos{argmap = ArgMap} = Eos) ->
     Value = convert_type(maps:get(type, Opt, string), ArgValue, ArgName, Eos),
-    parse_impl(Tail, CmdMap, Eos#eos{argmap = ArgMap#{ArgName => Value}});
+    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => Value}});
 
-action(Tail, CmdMap, undefined, #{name := ArgName, action := {store, Value}}, #eos{argmap = ArgMap} = Eos) ->
-    parse_impl(Tail, CmdMap, Eos#eos{argmap = ArgMap#{ArgName => Value}});
+action(Tail, undefined, #{name := ArgName, action := {store, Value}}, #eos{argmap = ArgMap} = Eos) ->
+    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => Value}});
 
-action(Tail, CmdMap, ArgValue, #{name := ArgName, action := append} = Opt, #eos{argmap = ArgMap} = Eos) ->
+action(Tail, ArgValue, #{name := ArgName, action := append} = Opt, #eos{argmap = ArgMap} = Eos) ->
     Value = convert_type(maps:get(type, Opt, string), ArgValue, ArgName, Eos),
-    parse_impl(Tail, CmdMap, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, []) ++ [Value]}});
+    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, []) ++ [Value]}});
 
-action(Tail, CmdMap, undefined, #{name := ArgName, action := {append, Value}}, #eos{argmap = ArgMap} = Eos) ->
-    parse_impl(Tail, CmdMap, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, []) ++ [Value]}});
+action(Tail, undefined, #{name := ArgName, action := {append, Value}}, #eos{argmap = ArgMap} = Eos) ->
+    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, []) ++ [Value]}});
 
-action(Tail, CmdMap, ArgValue, #{name := ArgName, action := extend} = Opt, #eos{argmap = ArgMap} = Eos) ->
+action(Tail, ArgValue, #{name := ArgName, action := extend} = Opt, #eos{argmap = ArgMap} = Eos) ->
     Value = convert_type(maps:get(type, Opt, string), ArgValue, ArgName, Eos),
     Extended = maps:get(ArgName, ArgMap, []) ++ Value,
-    parse_impl(Tail, CmdMap, Eos#eos{argmap = ArgMap#{ArgName => Extended}});
+    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => Extended}});
 
-action(Tail, CmdMap, undefined, #{name := ArgName, action := count}, #eos{argmap = ArgMap} = Eos) ->
-    parse_impl(Tail, CmdMap, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, 0) + 1}});
+action(Tail, undefined, #{name := ArgName, action := count}, #eos{argmap = ArgMap} = Eos) ->
+    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, 0) + 1}});
 
 %% default: same as set
-action(Tail, CmdMap, ArgValue, Opt, Eos) ->
-    action(Tail, CmdMap, ArgValue, Opt#{action => set}, Eos).
+action(Tail, ArgValue, Opt, Eos) ->
+    action(Tail, ArgValue, Opt#{action => set}, Eos).
 
 %%--------------------------------------------------------------------
 %% Type conversion
@@ -473,18 +615,18 @@ convert_type(string, Arg, _Opt, _Eos) ->
 convert_type({string, Re}, Arg, Opt, Eos) ->
     case re:run(Arg, Re) of
         {match, _X} -> Arg;
-        _ -> error({invalid_argument, Eos#eos.path, Opt, Arg})
+        _ -> fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end;
 convert_type({string, Re, ReOpt}, Arg, Opt, Eos) ->
     case re:run(Arg, Re, ReOpt) of
         match -> Arg;
         {match, _} -> Arg;
-        _ -> error({invalid_argument, Eos#eos.path, Opt, Arg})
+        _ -> fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end;
 convert_type(int, Arg, Opt, Eos) ->
     get_int(Arg, Opt, Eos);
 convert_type({int, Opts}, Arg, Opt, Eos) ->
-    minimax(get_int(Arg, Opt, Eos), Opts, Eos#eos.path, Opt);
+    minimax(get_int(Arg, Opt, Eos), Opts, Eos, Opt);
 convert_type(boolean, "true", _Opt, _Eos) ->
     true;
 convert_type(boolean, "false", _Opt, _Eos) ->
@@ -494,36 +636,39 @@ convert_type(binary, Arg, _Opt, _Eos) ->
 convert_type({binary, Re}, Arg, Opt, Eos) ->
     case re:run(Arg, Re) of
         {match, _X} -> list_to_binary(Arg);
-        _ -> error({invalid_argument, Eos#eos.path, Opt, Arg})
+        _ -> fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end;
 convert_type({binary, Re, ReOpt}, Arg, Opt, Eos) ->
     case re:run(Arg, Re, ReOpt) of
         match -> list_to_binary(Arg);
         {match, _} -> list_to_binary(Arg);
-        _ -> error({invalid_argument, Eos#eos.path, Opt, Arg})
+        _ -> fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end;
 convert_type(float, Arg, Opt, Eos) ->
     get_float(Arg, Opt, Eos);
 convert_type({float, Opts}, Arg, Opt, Eos) ->
-    minimax(get_float(Arg, Opt, Eos), Opts, Eos#eos.path, Opt);
+    minimax(get_float(Arg, Opt, Eos), Opts, Eos, Opt);
 convert_type(atom, Arg, Opt, Eos) ->
     try list_to_existing_atom(Arg)
     catch error:badarg ->
-        error({invalid_argument, Eos#eos.path, Opt, Arg})
+        fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end;
 convert_type({atom, unsafe}, Arg, _Opt, _Eos) ->
     list_to_atom(Arg);
-convert_type({custom, Fun}, Arg, _Opt, _Eos) ->
-    Fun(Arg).
+convert_type({custom, Fun}, Arg, Opt, Eos) ->
+    try Fun(Arg)
+    catch error:invalid_argument ->
+        fail({invalid_argument, Eos#eos.commands, Opt, Arg})
+    end.
 
-minimax(Var, [], _Path, _Opt) ->
+minimax(Var, [], _Eos, _Opt) ->
     Var;
-minimax(Var, [{min, Min} | _], Path, Opt) when Var < Min ->
-    error({invalid_argument, Path, Opt, Var});
-minimax(Var, [{max, Max} | _], Path, Opt) when Var > Max ->
-    error({invalid_argument, Path, Opt, Var});
-minimax(Var, [_ | Tail], Path, Opt) ->
-    minimax(Var, Tail, Path, Opt).
+minimax(Var, [{min, Min} | _], Eos, Opt) when Var < Min ->
+    fail({invalid_argument, Eos#eos.commands, Opt, Var});
+minimax(Var, [{max, Max} | _], Eos, Opt) when Var > Max ->
+    fail({invalid_argument, Eos#eos.commands, Opt, Var});
+minimax(Var, [_ | Tail], Eos, Opt) ->
+    minimax(Var, Tail, Eos, Opt).
 
 %% returns int from string, or errors out
 get_int(Arg, Opt, Eos) ->
@@ -531,7 +676,7 @@ get_int(Arg, Opt, Eos) ->
         {Int, []} ->
             Int;
         {error, _Reason} ->
-            error({invalid_argument, Eos#eos.path, Opt, Arg})
+            fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end.
 
 %% returns float from string, that is floating-point, or integer
@@ -545,7 +690,7 @@ get_float(Arg, Opt, Eos) ->
                 {Int, []} ->
                     Int;
                 {error, _IntReason} ->
-                    error({invalid_argument, Eos#eos.path, Opt, Arg})
+                    fail({invalid_argument, Eos#eos.commands, Opt, Arg})
             end
     end.
 
@@ -562,18 +707,6 @@ is_digits(String) ->
                     false
             end
     end.
-
-%% returns 'true' if OptMap has no options that look like a negative number
-no_digits(OptMap) ->
-    lists:all(
-        fun (#{short := Short}) when Short >= $0, Short =< $9 ->
-                false;
-            (#{long := Long}) ->
-                not is_digits(Long);
-            (_) ->
-                true
-        end,
-        OptMap).
 
 %% specially for 'maybe' (as '?') - produce a default argument, if it's there,
 %%  and if it's not, produce what is guessed to be the default value of a type
@@ -593,48 +726,59 @@ default(#{type := atom}) ->
 default(_) ->
     undefined.
 
-%% Turns Path (command stack) into textual representation, forward
-format_path([{undefined, _}]) ->
+format_path([]) ->
     "";
-format_path(undefined) ->
-    "";
-format_path(Path) ->
-    " " ++ lists:join(".", [atom_to_list(Cmd) || {Cmd, _} <- lists:reverse(Path), Cmd =/= undefined]).
+format_path(Commands) ->
+    lists:concat(lists:join(" ", lists:reverse(Commands))) ++ ": ".
+
+fail(Reason) ->
+    erlang:error({?MODULE, Reason}).
 
 %%--------------------------------------------------------------------
-%% Validation, and preprocessing when needed
+%% Validation and preprocessing
+%% Theoretically, Dialyzer should do that too.
+%% Practically, so many people ignore Dialyzer and then spend hours
+%%  trying to understand why things don't work, that is makes sense
+%%  to provide a mini-Dialyzer here.
+
+validate_impl(Command, #{progname := Prog} = Options) ->
+    Prefixes = maps:from_list([{P, true} || P <- maps:get(prefixes, Options, [$-])]),
+    validate_command([{Prog, Command}], Prefixes);
+validate_impl(Command, Options) ->
+    {ok, [[Prog]]} = init:get_argument(progname),
+    validate_impl(Command, Options#{progname => Prog}).
 
 %% validates commands, throws invalid_command or invalid_option error
-validate_command([{Name, Cmd} | _] = Path) ->
-    is_atom(Name) orelse
-        error({invalid_command, Path, commands, "command name must be an atom"}),
+validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
+    (is_list(Name) andalso (not is_map_key(hd(Name), Prefixes))) orelse
+        fail({invalid_command, clean_path(Path), commands, "command name must be a string, not starting with optional prefix"}),
     is_map(Cmd) orelse
-        error({invalid_command, Path, commands, "command description must be a map"}),
+        fail({invalid_command, clean_path(Path), commands, "command description must be a map"}),
     is_list(maps:get(help, Cmd, [])) orelse
-        error({invalid_command, Path, help, "help must be a string"}),
+        fail({invalid_command, clean_path(Path), help, "help must be a string"}),
     is_map(maps:get(commands, Cmd, #{})) orelse
-        error({invalid_command, Path, commands, "sub-commands must be a map"}),
+        fail({invalid_command, clean_path(Path), commands, "sub-commands must be a map"}),
     is_map_key(handler, Cmd) andalso (not is_function(maps:get(handler, Cmd))) andalso
-        error({invalid_command, Path, handler, "handler must be a function accepting single map argument"}),
+        fail({invalid_command, clean_path(Path), handler, "handler must be a function accepting single map argument"}),
     Cmd1 =
-        case maps:find(options, Cmd) of
+        case maps:find(arguments, Cmd) of
             error ->
                 Cmd;
             {ok, Opts} ->
-                Cmd#{options => [validate_option(Path, Opt) || Opt <- Opts]}
+                Cmd#{arguments => [validate_option(Path, Opt) || Opt <- Opts]}
         end,
     %% collect all short & long option identifiers - to figure out any conflicts
     lists:foldl(
-        fun ({_, #{options := Opts}}, Acc) ->
+        fun ({_, #{arguments := Opts}}, Acc) ->
             lists:foldl(
                 fun (#{short := Short, name := OName}, {AllS, AllL}) ->
                         is_map_key(Short, AllS) andalso
-                            error({invalid_option, Path, OName,
+                            fail({invalid_option, clean_path(Path), OName,
                                     "short conflicting with " ++ atom_to_list(maps:get(Short, AllS))}),
                         {AllS#{Short => OName}, AllL};
                     (#{long := Long, name := OName}, {AllS, AllL}) ->
                         is_map_key(Long, AllL) andalso
-                            error({invalid_option, Path, OName,
+                            fail({invalid_option, clean_path(Path), OName,
                                     "long conflicting with " ++ atom_to_list(maps:get(Long, AllL))}),
                         {AllS, AllL#{Long => OName}};
                     (_, AccIn) ->
@@ -646,30 +790,34 @@ validate_command([{Name, Cmd} | _] = Path) ->
     %% verify all sub-commands
     case maps:find(commands, Cmd1) of
         error ->
-            Cmd1;
+            {Name, Cmd1};
         {ok, Sub} ->
-            Cmd1#{commands => maps:map(fun (K, V) -> validate_command([{K, V} | Path]) end, Sub)}
+            {Name, Cmd1#{commands => maps:map(
+                fun (K, V) ->
+                    {K, Updated} = validate_command([{K, V} | Path], Prefixes),
+                    Updated
+                end, Sub)}}
     end.
 
 %{invalid_option, cmd_path(), option(), Field :: atom(), Reason :: string()} |
 validate_option(Path, #{name := Name} = Opt) when is_atom(Name) ->
-    %% options cannot have unrecognised map items
+    %% arguments cannot have unrecognised map items
     Unknown = maps:keys(maps:without([name, help, short, long, action, nargs, type, default, required], Opt)),
-    Unknown =/= [] andalso error({invalid_option, Path, Opt, hd(Unknown), "unrecognised field"}),
+    Unknown =/= [] andalso fail({invalid_option, clean_path(Path), hd(Unknown), "unrecognised field"}),
     %% verify specific arguments
     is_list(maps:get(help, Opt, [])) orelse
-        error({invalid_option, Path, Opt, help, "help must be a string"}),
+        fail({invalid_option, clean_path(Path), Name, help, "help must be a string"}),
     is_list(maps:get(long, Opt, [])) orelse
-        error({invalid_option, Path, Opt, long, "long must be a string"}),
+        fail({invalid_option, clean_path(Path), Name, long, "long must be a string"}),
     is_boolean(maps:get(required, Opt, true)) orelse
-        error({invalid_option, Path, Opt, required, "'required' must be boolean"}),
+        fail({invalid_option, clean_path(Path), Name, required, "'required' must be boolean"}),
     is_integer(maps:get(short, Opt, $a)) orelse
-        error({invalid_option, Path, Opt, short, "short must be character"}),
+        fail({invalid_option, clean_path(Path), Name, short, "short must be character"}),
     Opt1 = maybe_validate(action, Opt, fun validate_action/3, Path),
     Opt2 = maybe_validate(type, Opt1, fun validate_type/3, Path),
     maybe_validate(nargs, Opt2, fun validate_args/3, Path);
-validate_option(Path, Opt) ->
-    error({invalid_option, Path, Opt, name, "option must be a map, with name := atom()"}).
+validate_option(Path, _Opt) ->
+    fail({invalid_option, clean_path(Path), "", name, "argument must be a map, and specify 'name'"}).
 
 maybe_validate(Key, Map, Fun, Path) when is_map_key(Key, Map) ->
     maps:put(Key, Fun(maps:get(Key, Map), Path, Map), Map);
@@ -682,20 +830,20 @@ validate_action(append, _Path, _Opt) -> append;
 validate_action({append, Term}, _Path, _Opt) -> {append, Term};
 validate_action(count, _Path, _Opt) -> count;
 validate_action(extend, _Path, _Opt) -> extend;
-validate_action(_Action, Path, Opt) ->
-    error({invalid_option, Path, Opt, action, "action is not valid"}).
+validate_action(_Action, Path, #{name := Name}) ->
+    fail({invalid_option, clean_path(Path), Name, action, "action is not valid"}).
 
 validate_type(Simple, _Path, _Opt) when Simple =:= boolean; Simple =:= int; Simple =:= float;
     Simple =:= string; Simple =:= binary; Simple =:= atom; Simple =:= {atom, unsafe} ->
     Simple;
 validate_type({custom, Fun}, _Path, _Opt) when is_function(Fun, 1) ->
     {custom, Fun};
-validate_type({float, Opts}, Path, Opt) ->
-    [error({invalid_option, Path, Opt, Opts, "invalid validator"})
+validate_type({float, Opts}, Path, #{name := Name}) ->
+    [fail({invalid_option, clean_path(Path), Name, type, "invalid validator"})
         || {Kind, Val} <- Opts, (Kind =/= min andalso Kind =/= max) orelse (not is_float(Val))],
     {float, Opts};
-validate_type({int, Opts}, Path, Opt) ->
-    [error({invalid_option, Path, Opt, Opts, "invalid validator"})
+validate_type({int, Opts}, Path, #{name := Name}) ->
+    [fail({invalid_option, clean_path(Path), Name, type, "invalid validator"})
         || {Kind, Val} <- Opts, (Kind =/= min andalso Kind =/= max) orelse (not is_integer(Val))],
     {float, Opts};
 validate_type({string, Re} = Valid, _Path, _Opt) when is_list(Re) ->
@@ -706,12 +854,63 @@ validate_type({binary, Re} = Valid, _Path, _Opt) when is_binary(Re) ->
     Valid;
 validate_type({binary, Re, L} = Valid, _Path, _Opt) when is_binary(Re), is_list(L) ->
     Valid;
-validate_type(_Type, Path, Opt) ->
-    error({invalid_option, Path, Opt, type, "type is not supported"}).
+validate_type(_Type, Path, #{name := Name}) ->
+    fail({invalid_option, clean_path(Path), Name, type, "type is not supported"}).
 
 validate_args(N, _Path, _Opt) when is_integer(N), N >= 1 -> N;
 validate_args(Simple, _Path, _Opt) when Simple =:= all; Simple =:= list; Simple =:= maybe; Simple =:= nonempty_list ->
     Simple;
 validate_args({maybe, Term}, _Path, _Opt) -> {maybe, Term};
-validate_args(_Nargs, Path, Opt) ->
-    error({invalid_option, Path, Opt, args, "'nargs' is not valid"}).
+validate_args(_Nargs, Path, #{name := Name}) ->
+    fail({invalid_option, clean_path(Path), Name, args, "'nargs' is not valid"}).
+
+clean_path(Path) ->
+    [Cmd || {Cmd, _} <- Path].
+
+%%--------------------------------------------------------------------
+%% Built-in Help formatter
+
+format_help(#{indent := Indent, indent_next := IndentNext} = FormatOptions, {CmdName, Command}) ->
+    %% descend into sub-commands, indenting a little bit more
+    SubLines = ["\r\n\r\n" ++ format_help(FormatOptions#{indent => Indent ++ IndentNext}, Cmd)
+        || Cmd <- maps:to_list(maps:get(commands, Command, #{}))],
+    %% process all arguments, and figure out longest option
+    {Longest, Flags, Opts, Args, OptLines} = lists:foldl(fun format_opt_help/2,
+        {0, "", [], [], []}, maps:get(arguments, Command, [])),
+    %% format arguments with indent in mind
+    OptFormat = io_lib:format("~s~~-~bs ~~s", [Indent ++ IndentNext, Longest]),
+    FormOpts = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- OptLines],
+    %% format command name itself:
+    %%  utility_name [-abcDxyz][-p arg][operand]
+    AllOpts = lists:join(" ", lists:concat([Flags, Opts, Args])),
+    CmdDesc = io_lib:format("usage: ~s~s~s~s~n",  [Indent, CmdName, AllOpts, maps:get(help, Command, "")]),
+    lists:flatten(CmdDesc ++ lists:flatten(lists:join("\r\n", FormOpts)) ++ SubLines).
+
+%%%  Text without brackets or braces     Items you must type as shown
+%%%  <Text inside angle brackets>        Placeholder for which you must supply a value
+%%%  [Text inside square brackets]       Optional items
+%%%  {Text inside braces}                Set of required items; choose one
+%%%  Vertical bar (|)                    Separator for mutually exclusive items; choose one
+%%%  Ellipsis (...)                      Items that can be repeated
+
+format_opt_help(#{name := Name} = Opt, {Longest, Flags, Opts, Args, OptLines}) ->
+    Desc = maps:get(help, Opt, ""),
+    case {maps:find(short, Opt), maps:find(long, Opt), maps:get(required, Opt, false)} of
+        {_, _, true} ->
+            %% required - not a flag
+            LName = atom_to_list(Name),
+            {max(Longest, length(LName)), Flags, Opts, Args, [{LName, Desc}|OptLines]};
+        {error, error, _} ->
+            %% positional, hence required
+            LName = atom_to_list(Name),
+            {max(Longest, length(LName)), Flags, Opts, Args ++ [$ |LName], [{LName, Desc}|OptLines]};
+        {{ok, Short}, {ok, Long}, false} ->
+            %% optional with both names
+            {max(Longest, length(Long)), Flags ++ [Short], Opts, Args ++ [$ ,$-|Long], [{Long, Desc}|OptLines]};
+        {{ok, Short}, error, false} ->
+            %% flag
+            {max(Longest, 2), Flags, Opts, Args, [{[$-,Short], Desc}|OptLines]};
+        {error, {ok, Long}, false} ->
+            %% long option (not a flag), may or may not require argument
+            {max(Longest, length(Long)), Flags, Opts ++ [$ ,$[,$-|Long] ++ [$]], Args, [{Long, Desc}|OptLines]}
+    end. %% [{FullName, Desc} | OptLines]}.
