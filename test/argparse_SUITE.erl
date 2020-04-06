@@ -65,9 +65,6 @@ parse(Args, Command) ->
 parse_cmd(Args, Command) ->
     argparse:parse(string:lexemes(Args, " "), #{commands => Command}).
 
-help(Command) ->
-    argparse:help(#{}, Command).
-
 %%--------------------------------------------------------------------
 %% Test Cases
 
@@ -432,11 +429,11 @@ error_format(Config) when is_list(Config) ->
     ?assertEqual(Prog ++ ": internal error, option  field 'name': argument must be a map, and specify 'name'\n",
         make_error([""], #{arguments => [#{}]})),
     %%
-    ?assertEqual(Prog ++ ": internal error, option name field 'type': type is not supported\n",
+    ?assertEqual(Prog ++ ": internal error, option name field 'type': unsupported\n",
         make_error([""], #{arguments => [#{name => name, type => foo}]})),
-    ?assertEqual(Prog ++ ": internal error, option name field 'args': 'nargs' is not valid\n",
+    ?assertEqual(Prog ++ ": internal error, option name field 'nargs': unsupported\n",
         make_error([""], #{arguments => [#{name => name, nargs => foo}]})),
-    ?assertEqual(Prog ++ ": internal error, option name field 'action': action is not valid\n",
+    ?assertEqual(Prog ++ ": internal error, option name field 'action': unsupported\n",
         make_error([""], #{arguments => [#{name => name, action => foo}]})),
     %% unknown arguments
     ?assertEqual(Prog ++ ": unrecognised argument: arg\n", make_error(["arg"], #{})),
@@ -484,21 +481,24 @@ usage() ->
 usage(Config) when is_list(Config) ->
     Cmd = #{
         arguments => [
-            #{name => foo, help => "assigns foo"},
-            #{name => baz, short => $b, long => "-baz", help => "bazooka!"},
-            #{name => bar, long => "-bar", help => "optional bar"},
-            #{name => default, short => $d, default => default},
-            #{name => x, short => $X, help => "help for X short"}
+            #{name => r, short => $r, type => boolean, help => "recursive"},
+            #{name => f, short => $f, type => boolean, long => "-force", help => "force"},
+            #{name => v, short => $v, type => boolean, action => count, help => "verbosity level"},
+            #{name => interval, short => $i, type => int, help => "interval set"},
+            #{name => float, long => "-float", type => float, help => "floating-point long form argument"}
         ], commands => #{
-            sub => #{help => "subcommand help", arguments => [
-                #{name => notreq, required => false, help => "positional, but option, for subcommand"},
-                #{name => force, short => $f, help => "force sub-command"}
+            "start" => #{help => "verifies configuration and starts server", arguments => [
+                #{name => server, help => "server to start"},
+                #{name => name, required => false, nargs => list, help => "extra name to pass"}
             ], commands => #{
-                three => #{arguments => [
-                    #{name => opt3, long => "--opt3", help => "help for option three"}
-                ], help => "sub-help number three"}
+                "crawler" => #{arguments => [
+                        #{name => extra, long => "--extra", help => "extra option very deep"}
+                    ],
+                    help => "controls crawler behaviour"}
             }}
         }
     },
-    ct:pal("~s", [help(Cmd)]),
+    ct:pal("~s", [argparse:help(Cmd, #{command => ["start"]})]),
+    %% ct:pal("~s", [argparse:help(Cmd, #{})]),
     ok.
+    %%{fail, ok}.

@@ -17,6 +17,7 @@
 %%% Kinds of arguments supported:
 %%%  * command (priority positional argument) : ectl {crawler|reader|writer}
 %%%  * command, and sub-command:                ectl crawler {start|stop|check}
+%%%
 %%%  * positional argument (required):          ectl <arg1> <arg2>
 %%%  * positional argument (with default):      ectl [<arg1>]
 %%%
@@ -70,8 +71,8 @@
 -type argument() :: #{
     %% Argument name, and a destination to store value too
     %% It is allowed to have several arguments named the same, setting or appending to the same variable.
-    %% General recommendation is to use atom() for name.
-    name := term(),
+    %% It is used to format the name, hence it should be format-table with "~s".
+    name := atom() | string() | binary(),
 
     %% short, single-character variant of command line option, omitting dash (example: $b, meaning -b),
     %%  when present, this is optional argument
@@ -228,18 +229,14 @@ parse(Args, Command, Options) ->
 %% Help format options
 -type help_options() :: #{
     progname => string(),   %% program name override
-    indent => string(),     %% original indent (none by default)
-    indent_next => string() %% add this to next indent, DEFAULT_INDENT is default
+    command => [string()]   %% nested command (missing/empty for top-level command)
 }.
 
 %% @doc
 %% Returns help for Command formatted according to Options specified
 -spec help(command() | command_spec(), help_options()) -> string().
 help(Command, Options) ->
-    format_help(Options#{
-        indent => maps:get(indent, Options, ""),
-        indent_next => maps:get(indent_next, Options, ?DEFAULT_INDENT)
-        }, validate(Command, Options)).
+    format_help(validate(Command, Options), Options).
 
 %% @doc
 %% Format exception reasons produced by parse/2.
@@ -270,7 +267,7 @@ format_error({invalid_argument, Path, Name, Value}) ->
 format_error(Reason, Command) ->
     Path = element(2, Reason),
     ErrorText = format_error(Reason),
-    UsageText = help(#{path => Path}, Command),
+    UsageText = help(Command, #{command => Path}),
     ErrorText ++ UsageText.
 
 %%--------------------------------------------------------------------
@@ -572,7 +569,7 @@ split_to_option([Head | Tail], Left, Opts, Acc) ->
 %%--------------------------------------------------------------------
 %% Action handling
 
-action(Tail, ArgValue, #{name := ArgName, action := set} = Opt, #eos{argmap = ArgMap} = Eos) ->
+action(Tail, ArgValue, #{name := ArgName, action := store} = Opt, #eos{argmap = ArgMap} = Eos) ->
     Value = convert_type(maps:get(type, Opt, string), ArgValue, ArgName, Eos),
     parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => Value}});
 
@@ -596,12 +593,12 @@ action(Tail, undefined, #{name := ArgName, action := count}, #eos{argmap = ArgMa
 
 %% default: same as set
 action(Tail, ArgValue, Opt, Eos) ->
-    action(Tail, ArgValue, Opt#{action => set}, Eos).
+    action(Tail, ArgValue, Opt#{action => store}, Eos).
 
 %%--------------------------------------------------------------------
 %% Type conversion
 
-%% Handle "list" variant
+%% Handle "list" variant for nargs returning list
 convert_type({list, Type}, Arg, Opt, Eos) ->
     [convert_type(Type, Var, Opt, Eos) || Var <- Arg];
 
@@ -661,6 +658,9 @@ convert_type({custom, Fun}, Arg, Opt, Eos) ->
         fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end.
 
+%% @private
+%% Given Var, and list of {min, X}, {max, Y}, ensure that
+%%  value falls within defined limits.
 minimax(Var, [], _Eos, _Opt) ->
     Var;
 minimax(Var, [{min, Min} | _], Eos, Opt) when Var < Min ->
@@ -670,7 +670,8 @@ minimax(Var, [{max, Max} | _], Eos, Opt) when Var > Max ->
 minimax(Var, [_ | Tail], Eos, Opt) ->
     minimax(Var, Tail, Eos, Opt).
 
-%% returns int from string, or errors out
+%% @private
+%% returns int from string, or errors out with debugging info
 get_int(Arg, Opt, Eos) ->
     case string:to_integer(Arg) of
         {Int, []} ->
@@ -679,6 +680,7 @@ get_int(Arg, Opt, Eos) ->
             fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end.
 
+%% @private
 %% returns float from string, that is floating-point, or integer
 get_float(Arg, Opt, Eos) ->
     case string:to_float(Arg) of
@@ -708,8 +710,8 @@ is_digits(String) ->
             end
     end.
 
-%% specially for 'maybe' (as '?') - produce a default argument, if it's there,
-%%  and if it's not, produce what is guessed to be the default value of a type
+%% 'maybe' nargs for an option that does not have default set still have
+%%  to produce something, let's call it hardcoded default.
 default(#{default := Default}) ->
     Default;
 default(#{type := boolean}) ->
@@ -726,11 +728,15 @@ default(#{type := atom}) ->
 default(_) ->
     undefined.
 
+%% when parsing, state is stored in a reversed form
+%% when error needs to be formatted, command path should be
+%%  reversed and joined with " "
 format_path([]) ->
     "";
 format_path(Commands) ->
     lists:concat(lists:join(" ", lists:reverse(Commands))) ++ ": ".
 
+%% to simplify throwing errors with the right reason
 fail(Reason) ->
     erlang:error({?MODULE, Reason}).
 
@@ -799,20 +805,20 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
                 end, Sub)}}
     end.
 
-%{invalid_option, cmd_path(), option(), Field :: atom(), Reason :: string()} |
+%% validates option spec
 validate_option(Path, #{name := Name} = Opt) when is_atom(Name) ->
     %% arguments cannot have unrecognised map items
     Unknown = maps:keys(maps:without([name, help, short, long, action, nargs, type, default, required], Opt)),
     Unknown =/= [] andalso fail({invalid_option, clean_path(Path), hd(Unknown), "unrecognised field"}),
     %% verify specific arguments
     is_list(maps:get(help, Opt, [])) orelse
-        fail({invalid_option, clean_path(Path), Name, help, "help must be a string"}),
+        fail({invalid_option, clean_path(Path), Name, help, "must be a string"}),
     is_list(maps:get(long, Opt, [])) orelse
-        fail({invalid_option, clean_path(Path), Name, long, "long must be a string"}),
+        fail({invalid_option, clean_path(Path), Name, long, "must be a string"}),
     is_boolean(maps:get(required, Opt, true)) orelse
-        fail({invalid_option, clean_path(Path), Name, required, "'required' must be boolean"}),
+        fail({invalid_option, clean_path(Path), Name, required, "must be boolean"}),
     is_integer(maps:get(short, Opt, $a)) orelse
-        fail({invalid_option, clean_path(Path), Name, short, "short must be character"}),
+        fail({invalid_option, clean_path(Path), Name, short, "must be character"}),
     Opt1 = maybe_validate(action, Opt, fun validate_action/3, Path),
     Opt2 = maybe_validate(type, Opt1, fun validate_type/3, Path),
     maybe_validate(nargs, Opt2, fun validate_args/3, Path);
@@ -824,6 +830,7 @@ maybe_validate(Key, Map, Fun, Path) when is_map_key(Key, Map) ->
 maybe_validate(_Key, Map, _Fun, _Path) ->
     Map.
 
+%% validate action field
 validate_action(store, _Path, _Opt) -> store;
 validate_action({store, Term}, _Path, _Opt) -> {store, Term};
 validate_action(append, _Path, _Opt) -> append;
@@ -831,8 +838,9 @@ validate_action({append, Term}, _Path, _Opt) -> {append, Term};
 validate_action(count, _Path, _Opt) -> count;
 validate_action(extend, _Path, _Opt) -> extend;
 validate_action(_Action, Path, #{name := Name}) ->
-    fail({invalid_option, clean_path(Path), Name, action, "action is not valid"}).
+    fail({invalid_option, clean_path(Path), Name, action, "unsupported"}).
 
+%% validate type field
 validate_type(Simple, _Path, _Opt) when Simple =:= boolean; Simple =:= int; Simple =:= float;
     Simple =:= string; Simple =:= binary; Simple =:= atom; Simple =:= {atom, unsafe} ->
     Simple;
@@ -855,62 +863,163 @@ validate_type({binary, Re} = Valid, _Path, _Opt) when is_binary(Re) ->
 validate_type({binary, Re, L} = Valid, _Path, _Opt) when is_binary(Re), is_list(L) ->
     Valid;
 validate_type(_Type, Path, #{name := Name}) ->
-    fail({invalid_option, clean_path(Path), Name, type, "type is not supported"}).
+    fail({invalid_option, clean_path(Path), Name, type, "unsupported"}).
 
 validate_args(N, _Path, _Opt) when is_integer(N), N >= 1 -> N;
 validate_args(Simple, _Path, _Opt) when Simple =:= all; Simple =:= list; Simple =:= maybe; Simple =:= nonempty_list ->
     Simple;
 validate_args({maybe, Term}, _Path, _Opt) -> {maybe, Term};
 validate_args(_Nargs, Path, #{name := Name}) ->
-    fail({invalid_option, clean_path(Path), Name, args, "'nargs' is not valid"}).
+    fail({invalid_option, clean_path(Path), Name, nargs, "unsupported"}).
 
+%% used to throw an error - strips command component out of path
 clean_path(Path) ->
     [Cmd || {Cmd, _} <- Path].
 
 %%--------------------------------------------------------------------
 %% Built-in Help formatter
 
-format_help(#{indent := Indent, indent_next := IndentNext} = FormatOptions, {CmdName, Command}) ->
-    %% descend into sub-commands, indenting a little bit more
-    SubLines = ["\r\n\r\n" ++ format_help(FormatOptions#{indent => Indent ++ IndentNext}, Cmd)
-        || Cmd <- maps:to_list(maps:get(commands, Command, #{}))],
-    %% process all arguments, and figure out longest option
-    {Longest, Flags, Opts, Args, OptLines} = lists:foldl(fun format_opt_help/2,
-        {0, "", [], [], []}, maps:get(arguments, Command, [])),
-    %% format arguments with indent in mind
-    OptFormat = io_lib:format("~s~~-~bs ~~s", [Indent ++ IndentNext, Longest]),
+%% Example format:
+%%
+%% usage: utility [-rxvf] [-i <int>] [--float <float>] <command> [<ARGS>]
+%%
+%% Commands:
+%%   start   verifies configuration and starts server
+%%   stop    stops running server
+%%
+%% Optional arguments:
+%%  -r       recursive
+%%  -v       increase verbosity level
+%%  -f       force
+%%  -i <int> interval set
+%%  --float <float> floating-point long form argument
+%%
+
+%% Example for deeper nested help (amount of flags reduced from previous example)
+%%
+%% usage: utility [-rz] [-i <int>] start <SERVER> [<NAME>]
+%%
+%% Optional arguments:
+%%  -r       recursive
+%%  -z       use zlib compression
+%%  -i <int> integer variable
+%%  SERVER   server to start
+%%  NAME     extra name to pass
+%%
+
+format_help({CmdName, Root}, Format) ->
+    Prefix = hd(maps:get(prefixes, Format, [$-])),
+    Nested = maps:get(command, Format, []),
+    %% descent into commands collecting all options on the way
+    {Cmd, AllArgs} = collect_options(Root, Nested, []),
+    %% split arguments into Flags, Options, Positional, and create help lines
+    {_, Longest, Flags, Opts, Args, OptLines} = lists:foldl(fun format_opt_help/2,
+        {Prefix, 0, "", [], [], []}, AllArgs),
+    %% collect and format sub-commands
+    Immediate = maps:get(commands, Cmd, #{}),
+    {Long, Subs} = maps:fold(
+        fun (Name, Sub, {Long, SubAcc}) ->
+            Help = maps:get(help, Sub, ""),
+            {max(Long, length(Name)), [{Name, Help}|SubAcc]}
+        end, {Longest, []}, Immediate),
+    %% format sub-commands
+    SubFormat = io_lib:format("  ~~-~bs ~~s~n", [Long]),
+    Commands = lists:concat([io_lib:format(SubFormat, [N, D]) || {N, D} <- Subs]),
+    ShortCmd =
+        case map_size(Immediate) of
+            0 ->
+                "";
+            Small when Small < 3 ->
+                " " ++ lists:concat(lists:join(" ", Nested)) ++  " {" ++
+                    lists:concat(lists:join("|", maps:keys(Immediate))) ++ "}";
+            _Largs ->
+                io_lib:format("~s <command>", [lists:concat(lists:join(" ", Nested))])
+        end,
+    %% format flags
+    FlagsForm = if Flags =:=[] -> ""; true -> io_lib:format(" [~c~s]", [Prefix, Flags]) end,
+    %% format non-flag optionals
+    OptsForm = Opts,
+    %% format positional arguments
+    ArgsForm = Args,
+    %% format extended view
+    OptFormat = io_lib:format("  ~~-~bs ~~s~n", [Longest]),
     FormOpts = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- OptLines],
-    %% format command name itself:
-    %%  utility_name [-abcDxyz][-p arg][operand]
-    AllOpts = lists:join(" ", lists:concat([Flags, Opts, Args])),
-    CmdDesc = io_lib:format("usage: ~s~s~s~s~n",  [Indent, CmdName, AllOpts, maps:get(help, Command, "")]),
-    lists:flatten(CmdDesc ++ lists:flatten(lists:join("\r\n", FormOpts)) ++ SubLines).
+    %% format first usage line
+    lists:flatten(io_lib:format("usage: ~s~s~s~s~s~n~s~s", [CmdName, ShortCmd, FlagsForm, OptsForm, ArgsForm,
+        maybe_add("~nSubcommands:~n~s", Commands), maybe_add("~nOptional arguments:~n~s", FormOpts)])).
 
-%%%  Text without brackets or braces     Items you must type as shown
-%%%  <Text inside angle brackets>        Placeholder for which you must supply a value
-%%%  [Text inside square brackets]       Optional items
-%%%  {Text inside braces}                Set of required items; choose one
-%%%  Vertical bar (|)                    Separator for mutually exclusive items; choose one
-%%%  Ellipsis (...)                      Items that can be repeated
+%% collects options on the Path, and returns found Command
+collect_options(Command, [], Args) ->
+    {Command, maps:get(arguments, Command, []) ++ Args};
+collect_options(Command, [Cmd|Tail], Args) ->
+    Sub = maps:get(commands, Command),
+    SubCmd = maps:get(Cmd, Sub),
+    collect_options(SubCmd, Tail, maps:get(arguments, Command, []) ++ Args).
 
-format_opt_help(#{name := Name} = Opt, {Longest, Flags, Opts, Args, OptLines}) ->
+%% conditionally adds text and empty lines
+maybe_add(_ToAdd, []) ->
+    [];
+maybe_add(ToAdd, List) ->
+    io_lib:format(ToAdd, [List]).
+
+%% create help line for every option, collecting together all flags, short options,
+%%  long options, and positional arguments
+
+%% format optional argument
+format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) when ?IS_OPTIONAL(Opt) ->
     Desc = maps:get(help, Opt, ""),
-    case {maps:find(short, Opt), maps:find(long, Opt), maps:get(required, Opt, false)} of
-        {_, _, true} ->
-            %% required - not a flag
-            LName = atom_to_list(Name),
-            {max(Longest, length(LName)), Flags, Opts, Args, [{LName, Desc}|OptLines]};
-        {error, error, _} ->
-            %% positional, hence required
-            LName = atom_to_list(Name),
-            {max(Longest, length(LName)), Flags, Opts, Args ++ [$ |LName], [{LName, Desc}|OptLines]};
-        {{ok, Short}, {ok, Long}, false} ->
-            %% optional with both names
-            {max(Longest, length(Long)), Flags ++ [Short], Opts, Args ++ [$ ,$-|Long], [{Long, Desc}|OptLines]};
-        {{ok, Short}, error, false} ->
-            %% flag
-            {max(Longest, 2), Flags, Opts, Args, [{[$-,Short], Desc}|OptLines]};
-        {error, {ok, Long}, false} ->
-            %% long option (not a flag), may or may not require argument
-            {max(Longest, length(Long)), Flags, Opts ++ [$ ,$[,$-|Long] ++ [$]], Args, [{Long, Desc}|OptLines]}
-    end. %% [{FullName, Desc} | OptLines]}.
+    %% does it need an argument? look for nargs and action
+    RequiresArg = requires_argument(Opt),
+    %% long form always added to Opts
+    {Name0, MaybeOpt0} =
+        case maps:find(long, Opt) of
+            error ->
+                {"", []};
+            {ok, Long} when RequiresArg ->
+                FN = [Prefix | Long],
+                {FN, [format_required(false, FN ++ " ", Opt)]};
+            {ok, Long} when map_get(required, Opt) =:= true ->
+                FN = [Prefix | Long],
+                {FN, [[$ |FN]]};
+            {ok, Long} ->
+                FN = [Prefix | Long],
+                {FN, [io_lib:format(" [~s]", [FN])]}
+        end,
+    %% short may go to flags, or Opts
+    {Name, MaybeFlag, MaybeOpt} =
+        case maps:find(short, Opt) of
+            error ->
+                {Name0, [], MaybeOpt0};
+            {ok, Short} when RequiresArg ->
+                SN = [Prefix, Short],
+                {maybe_concat(SN, Name0), [],
+                    [format_required(false, SN ++ " ", Opt) | MaybeOpt0]};
+            {ok, Short} ->
+                {maybe_concat([Prefix, Short], Name0), [Short], MaybeOpt0}
+        end,
+    %% name length, capped at 16
+    NameLen = length(Name),
+    Capped = min(24, NameLen),
+    {Prefix, max(Capped, Longest), Flags ++ MaybeFlag, Opts ++ MaybeOpt, Args, [{Name, Desc} | OptLines]};
+
+%% format positional argument
+format_opt_help(#{name := Name} = Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) ->
+    Desc = maps:get(help, Opt, ""),
+    %% positional, hence required
+    LName = io_lib:format("~s", [Name]),
+    LPos = format_required(maps:get(required, Opt, true), "", Opt),
+    {Prefix, max(Longest, length(LName)), Flags, Opts, Args ++ LPos, [{LName, Desc}|OptLines]}.
+
+%% option formatting helpers
+maybe_concat(No, []) -> No;
+maybe_concat(No, L) -> No ++ ", " ++ L.
+
+format_required(true, Extra, #{name := Name} = Opt) ->
+    io_lib:format(" ~s<~s>~s", [Extra, Name, format_nargs(Opt)]);
+format_required(false, Extra, #{name := Name} = Opt) ->
+    io_lib:format(" [~s<~s>~s]", [Extra, Name, format_nargs(Opt)]).
+
+format_nargs(#{nargs := Dots}) when Dots =:= list; Dots =:= all; Dots =:= nonempty_list ->
+    "...";
+format_nargs(_) ->
+    "".
