@@ -155,9 +155,20 @@ Command specification may contain following fields:
   * **commands** - sub-commands, name to nested command spec
   * **arguments** - list of argument specifications
   * **help** - string to generate usage information
-  * **handler** - function accepting arguments map,
-    automatically created by cli:run, unless specified by user
+  * **handler** - function expected to process this command, or *optional* atom
   * user-defined fields
+
+Missing handler field is automatically populated by CLI framework, when a module
+exporting ```cli/0``` also exports function function with arity 1, named
+after command:
+
+    cli() -> #{commands => #{"run" => #{...}}}.
+    
+    run(ArgMap) -> ....
+
+If command contains sub-commands, and handler is not present, it is an error
+if arguments supplied to ```parse``` do not select one of the sub-commands. Set
+handler to *optional* to not require sub-command selected.
 
 Command is matched as a positional argument, taking precedence over other
 positional arguments. For any positional argument found, parser will first

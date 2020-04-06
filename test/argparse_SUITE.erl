@@ -410,7 +410,10 @@ subcommand(Config) when is_list(Config) ->
                 "two" => TwoCmd}}}},
     ?assertEqual(
         {#{force => true, baz => "N1O1O", foo => true, bar => "bar"}, {"two", TwoCmd}},
-        parse("one N1O1O -f two --foo bar", Cmd)).
+        parse("one N1O1O -f two --foo bar", Cmd)),
+    %% it is an error not to choose subcommand
+    ?assertException(error, {argparse, {missing_argument,_,[]}},
+        parse("one N1O1O -f", Cmd)).
 
 error_format() ->
     [{doc, "Tests error output formatter"}].
@@ -484,21 +487,29 @@ usage(Config) when is_list(Config) ->
             #{name => r, short => $r, type => boolean, help => "recursive"},
             #{name => f, short => $f, type => boolean, long => "-force", help => "force"},
             #{name => v, short => $v, type => boolean, action => count, help => "verbosity level"},
-            #{name => interval, short => $i, type => int, help => "interval set"},
+            #{name => interval, short => $i, type => {int, [{min, 1}]}, help => "interval set"},
             #{name => float, long => "-float", type => float, help => "floating-point long form argument"}
         ], commands => #{
             "start" => #{help => "verifies configuration and starts server", arguments => [
-                #{name => server, help => "server to start"},
-                #{name => name, required => false, nargs => list, help => "extra name to pass"}
-            ], commands => #{
-                "crawler" => #{arguments => [
-                        #{name => extra, long => "--extra", help => "extra option very deep"}
-                    ],
-                    help => "controls crawler behaviour"}
-            }}
+                    #{name => server, help => "server to start"},
+                    #{name => shard, short => $s, type => int, nargs => nonempty_list, help => "initial shards"},
+                    #{name => part, short => $p, type => int, nargs => list, help => "some parts"},
+                    #{name => name, required => false, nargs => list, help => "extra name to pass"}
+                ], commands => #{
+                    "crawler" => #{arguments => [
+                            #{name => extra, long => "--extra", help => "extra option very deep"}
+                        ],
+                        help => "controls crawler behaviour"}
+                }},
+            "stop" => #{help => "stops running server", arguments => []
+            },
+            "status" => #{help => "prints server status", arguments => []
+            },
+            "restart" => #{help => "restarts server specified", arguments => [
+                #{name => server, help => "server to restart"}
+            ]}
         }
     },
     ct:pal("~s", [argparse:help(Cmd, #{command => ["start"]})]),
-    %% ct:pal("~s", [argparse:help(Cmd, #{})]),
+    ct:pal("~s", [argparse:help(Cmd, #{})]),
     ok.
-    %%{fail, ok}.

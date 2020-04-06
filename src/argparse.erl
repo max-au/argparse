@@ -333,12 +333,16 @@ parse_impl([Positional | Tail], Eos) ->
 
 %% Entire command line has been matched, go over missing arguments,
 %%  add defaults etc
-parse_impl([], #eos{argmap = ArgMap0, pos = Pos} = Eos) ->
+parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, pos = Pos} = Eos) ->
+    %% error if stopped at sub-command with no handler
+    map_size(maps:get(commands, Current, #{})) >0 andalso
+        (not is_map_key(handler, Current)) andalso
+        fail({missing_argument, Commands, ""}),
     %% go over remaining positional, verify they are all not required
-    ArgMap1 = fold_args_map(Eos#eos.commands, true, ArgMap0, Pos),
+    ArgMap1 = fold_args_map(Commands, true, ArgMap0, Pos),
     %% go over optionals, and either raise an error, or set default
-    ArgMap2 = fold_args_map(Eos#eos.commands, false, ArgMap1, maps:values(Eos#eos.short)),
-    ArgMap3 = fold_args_map(Eos#eos.commands, false, ArgMap2, maps:values(Eos#eos.long)),
+    ArgMap2 = fold_args_map(Commands, false, ArgMap1, maps:values(Eos#eos.short)),
+    ArgMap3 = fold_args_map(Commands, false, ArgMap2, maps:values(Eos#eos.long)),
     case Eos#eos.commands of
         [_] ->
             %% if there were no commands specified, only the argument map
@@ -425,15 +429,14 @@ no_digits(true, _, _, Long) ->
 %% additional functions for optional arguments processing
 
 %% @private
-%% Returns true when option (!) description passed required a positional argument
-%% Argument required when: nargs is positive, or nonempty_list, or
-%%  nargs is not set, and action is store/append/not_set for a non-boolean type.
-requires_argument(#{nargs := nonempty_list}) ->
-    true;
-requires_argument(#{nargs := Count}) when is_integer(Count) ->
-    true;
-requires_argument(#{nargs := _Any}) ->
+%% Returns true when option (!) description passed requires a positional argument,
+%%  hence cannot be treated as a flag.
+requires_argument(#{nargs := {maybe, _Term}}) ->
     false;
+requires_argument(#{nargs := maybe}) ->
+    false;
+requires_argument(#{nargs := _Any}) ->
+    true;
 requires_argument(Opt) ->
     case maps:get(action, Opt, store) of
         store ->
@@ -853,7 +856,7 @@ validate_type({float, Opts}, Path, #{name := Name}) ->
 validate_type({int, Opts}, Path, #{name := Name}) ->
     [fail({invalid_option, clean_path(Path), Name, type, "invalid validator"})
         || {Kind, Val} <- Opts, (Kind =/= min andalso Kind =/= max) orelse (not is_integer(Val))],
-    {float, Opts};
+    {int, Opts};
 validate_type({string, Re} = Valid, _Path, _Opt) when is_list(Re) ->
     Valid;
 validate_type({string, Re, L} = Valid, _Path, _Opt) when is_list(Re), is_list(L) ->
@@ -967,7 +970,8 @@ maybe_add(ToAdd, List) ->
 
 %% format optional argument
 format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) when ?IS_OPTIONAL(Opt) ->
-    Desc = maps:get(help, Opt, ""),
+    Desc = lists:flatten(io_lib:format("~s~s~s",
+        [maps:get(help, Opt, ""), format_type(Opt), format_default(Opt)])),
     %% does it need an argument? look for nargs and action
     RequiresArg = requires_argument(Opt),
     %% long form always added to Opts
@@ -1004,7 +1008,8 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) when ?IS_OP
 
 %% format positional argument
 format_opt_help(#{name := Name} = Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) ->
-    Desc = maps:get(help, Opt, ""),
+    Desc = lists:flatten(io_lib:format("~s~s~s",
+        [maps:get(help, Opt, ""), format_type(Opt), format_default(Opt)])),
     %% positional, hence required
     LName = io_lib:format("~s", [Name]),
     LPos = format_required(maps:get(required, Opt, true), "", Opt),
@@ -1022,4 +1027,30 @@ format_required(false, Extra, #{name := Name} = Opt) ->
 format_nargs(#{nargs := Dots}) when Dots =:= list; Dots =:= all; Dots =:= nonempty_list ->
     "...";
 format_nargs(_) ->
+    "".
+
+format_type(#{type := {Num, Valid}}) when Num =:= int; Num =:= float ->
+    case {proplists:get_value(min, Valid), proplists:get_value(max, Valid)} of
+        {undefined, undefined} ->
+            io_lib:format(", ~s", [Num]);
+        {Min, undefined} ->
+            io_lib:format(", ~s > ~tp", [Num, Min]);
+        {undefined, Max} ->
+            io_lib:format(", ~s < ~tp", [Num, Max]);
+        {Min, Max} ->
+            io_lib:format(", ~tp < ~s < ~tp", [Min, Num, Max])
+    end;
+format_type(#{type := Type}) when is_tuple(Type), (element(1, Type) =:= string orelse element(1, Type) =:= binary) ->
+    Re = element(2, Type),
+    io_lib:format(", ~s re: ~s", [Type, Re]);
+format_type(#{type := boolean}) ->
+    "";
+format_type(#{type := Type}) when is_atom(Type) ->
+    io_lib:format(", ~s", [Type]);
+format_type(_Opt) ->
+    "".
+
+format_default(#{default := Def}) ->
+    io_lib:format(", [~tp]", [Def]);
+format_default(_) ->
     "".
