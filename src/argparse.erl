@@ -45,9 +45,10 @@
     validate/2,
     parse/2,
     parse/3,
+    help/1,
     help/2,
     format_error/1,
-    format_error/2
+    format_error/3
 ]).
 
 %%--------------------------------------------------------------------
@@ -58,12 +59,27 @@
 %% @doc
 %% Built-in types include basic validation abilities
 %% String and binary validation may use regex match (ignoring captured value).
--type arg_type() :: boolean |
-    float | {float, [{min, float()} | {max, float()}]} |
-    int | {int, [{min, integer()} | {max, integer()}]} |
-    string | {string, string()} | {string, string(), [term()]} |
-    binary | {binary, binary()} | {binary, binary(), [term()]} |
-    atom | {atom, unsafe} |
+%% For float, int, string, binary and atom type, it is possible to specify
+%%  available choices instead of regex/min/max.
+-type arg_type() ::
+    boolean |
+    float |
+    {float, [float()]} |
+    {float, [{min, float()} | {max, float()}]} |
+    int |
+    {int, [integer()]} |
+    {int, [{min, integer()} | {max, integer()}]} |
+    string |
+    {string, [string()]} |
+    {string, string()} |
+    {string, string(), [term()]} |
+    binary |
+    {binary, [binary()]} |
+    {binary, binary()} |
+    {binary, binary(), [term()]} |
+    atom |
+    {atom, [atom()]} |
+    {atom, unsafe} |
     {custom, fun((string()) -> term())}.
 
 %% Command line argument specification.
@@ -150,7 +166,6 @@
 
 %% Optional or positional argument?
 -define(IS_OPTIONAL(Arg), is_map_key(short, Arg) orelse is_map_key(long, Arg)).
--define(IS_POSITIONAL(Arg), not ?IS_OPTIONAL(Arg)).
 
 %% Command path, for deeply nested sub-commands
 -type cmd_path() :: [string()].
@@ -185,7 +200,10 @@
 %% Parser options
 -type parser_options() :: #{
     %% allowed prefixes (default is [$-]).
-    prefixes => [integer()]
+    prefixes => [integer()],
+    %% next fields are only considered when printing usage
+    progname => string(),   %% program name override
+    command => [string()]   %% nested command (missing/empty for top-level command)
 }.
 
 %% Command name with command spec
@@ -216,25 +234,25 @@ parse(Args, Command) ->
 %% @doc
 %% Parses supplied arguments, with additional options specified.
 -spec parse(Args :: [string()], command() | command_spec(),
-    Options :: parser_options()) -> parse_result.
+    Options :: parser_options()) -> parse_result().
 parse(Args, Command, Options) ->
     {Prog, Cmd} = validate(Command, Options),
     Prefixes = maps:from_list([{P, true} || P <- maps:get(prefixes, Options, [$-])]),
-    parse_impl(Args, merge_arguments(Prog, Cmd, #eos{prefixes = Prefixes})).
+    parse_impl(Args, merge_arguments(Prog, Cmd, #eos{prefixes = Prefixes, current = Cmd})).
 
 %% By default, options are indented with 2 spaces for each level of
 %%  sub-command.
 -define (DEFAULT_INDENT, "  ").
 
-%% Help format options
--type help_options() :: #{
-    progname => string(),   %% program name override
-    command => [string()]   %% nested command (missing/empty for top-level command)
-}.
+%% @doc
+%% Returns help for Command
+-spec help(command() | command_spec()) -> string().
+help(Command) ->
+    format_help(validate(Command), #{}).
 
 %% @doc
 %% Returns help for Command formatted according to Options specified
--spec help(command() | command_spec(), help_options()) -> string().
+-spec help(command() | command_spec(), parser_options()) -> string().
 help(Command, Options) ->
     format_help(validate(Command, Options), Options).
 
@@ -263,11 +281,11 @@ format_error({invalid_argument, Path, Name, Value}) ->
 %% @doc
 %% Formats exception, and adds command usage information for
 %%  command that was known/parsed when exception was raised.
--spec format_error(argparse_reason(), command() | command_spec()) -> string().
-format_error(Reason, Command) ->
-    Path = element(2, Reason),
+-spec format_error(argparse_reason(), command() | command_spec(), parser_options()) -> string().
+format_error(Reason, Command, Options) ->
+    Path = tl(lists:reverse(element(2, Reason))),
     ErrorText = format_error(Reason),
-    UsageText = help(Command, #{command => Path}),
+    UsageText = help(Command, Options#{command => Path}),
     ErrorText ++ UsageText.
 
 %%--------------------------------------------------------------------
@@ -537,13 +555,8 @@ consume([[Prefix | _] = ArgValue | Tail], Opt, Eos) when ?IS_OPTIONAL(Opt), is_m
             fail({missing_argument, Eos#eos.commands, maps:get(name, Opt)})
     end;
 
-consume([ArgValue | Tail], Opt, Eos) when ?IS_OPTIONAL(Opt) ->
-    action(Tail, ArgValue, Opt, Eos);
-
-%% positional: just consume one, no 'maybe' behaviour
 consume([ArgValue | Tail], Opt, Eos) ->
-    %% for positionals, strip the matched one now
-    action(Tail, ArgValue, Opt, Eos#eos{pos = tl(Eos#eos.pos)}).
+    action(Tail, ArgValue, Opt, Eos).
 
 %% no more arguments for consumption, but last optional may still be action-ed
 %%consume([], Current, Opt, Eos) ->
@@ -574,29 +587,37 @@ split_to_option([Head | Tail], Left, Opts, Acc) ->
 
 action(Tail, ArgValue, #{name := ArgName, action := store} = Opt, #eos{argmap = ArgMap} = Eos) ->
     Value = convert_type(maps:get(type, Opt, string), ArgValue, ArgName, Eos),
-    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => Value}});
+    continue_parser(Tail,  Opt, Eos#eos{argmap = ArgMap#{ArgName => Value}});
 
-action(Tail, undefined, #{name := ArgName, action := {store, Value}}, #eos{argmap = ArgMap} = Eos) ->
-    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => Value}});
+action(Tail, undefined, #{name := ArgName, action := {store, Value}} = Opt, #eos{argmap = ArgMap} = Eos) ->
+    continue_parser(Tail,  Opt, Eos#eos{argmap = ArgMap#{ArgName => Value}});
 
 action(Tail, ArgValue, #{name := ArgName, action := append} = Opt, #eos{argmap = ArgMap} = Eos) ->
     Value = convert_type(maps:get(type, Opt, string), ArgValue, ArgName, Eos),
-    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, []) ++ [Value]}});
+    continue_parser(Tail,  Opt, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, []) ++ [Value]}});
 
-action(Tail, undefined, #{name := ArgName, action := {append, Value}}, #eos{argmap = ArgMap} = Eos) ->
-    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, []) ++ [Value]}});
+action(Tail, undefined, #{name := ArgName, action := {append, Value}} = Opt, #eos{argmap = ArgMap} = Eos) ->
+    continue_parser(Tail,  Opt, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, []) ++ [Value]}});
 
 action(Tail, ArgValue, #{name := ArgName, action := extend} = Opt, #eos{argmap = ArgMap} = Eos) ->
     Value = convert_type(maps:get(type, Opt, string), ArgValue, ArgName, Eos),
     Extended = maps:get(ArgName, ArgMap, []) ++ Value,
-    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => Extended}});
+    continue_parser(Tail, Opt, Eos#eos{argmap = ArgMap#{ArgName => Extended}});
 
-action(Tail, undefined, #{name := ArgName, action := count}, #eos{argmap = ArgMap} = Eos) ->
-    parse_impl(Tail, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, 0) + 1}});
+action(Tail, undefined, #{name := ArgName, action := count} = Opt, #eos{argmap = ArgMap} = Eos) ->
+    continue_parser(Tail,  Opt, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, 0) + 1}});
 
 %% default: same as set
 action(Tail, ArgValue, Opt, Eos) ->
     action(Tail, ArgValue, Opt#{action => store}, Eos).
+
+%% pop last positional, unless nargs is list/nonempty_list
+continue_parser(Tail, Opt, Eos) when ?IS_OPTIONAL(Opt) ->
+    parse_impl(Tail, Eos);
+continue_parser(Tail, #{nargs := List}, Eos) when List =:= list; List =:= nonempty_list ->
+    parse_impl(Tail, Eos);
+continue_parser(Tail, _Opt, Eos) ->
+    parse_impl(Tail, Eos#eos{pos = tl(Eos#eos.pos)}).
 
 %%--------------------------------------------------------------------
 %% Type conversion
@@ -611,6 +632,10 @@ convert_type(raw, Arg, _Opt, _Eos) ->
 
 %% Handle actual types
 convert_type(string, Arg, _Opt, _Eos) ->
+    Arg;
+convert_type({string, Choices}, Arg, Opt, Eos) when is_list(Choices), is_list(hd(Choices)) ->
+    lists:member(Arg, Choices) orelse
+        fail({invalid_argument, Eos#eos.commands, Opt, Arg}),
     Arg;
 convert_type({string, Re}, Arg, Opt, Eos) ->
     case re:run(Arg, Re) of
@@ -633,6 +658,11 @@ convert_type(boolean, "false", _Opt, _Eos) ->
     false;
 convert_type(binary, Arg, _Opt, _Eos) ->
     list_to_binary(Arg);
+convert_type({binary, Choices}, Arg, Opt, Eos) when is_list(Choices), is_binary(hd(Choices)) ->
+    Conv = list_to_binary(Arg),
+    lists:member(Conv, Choices) orelse
+        fail({invalid_argument, Eos#eos.commands, Opt, Arg}),
+    Conv;
 convert_type({binary, Re}, Arg, Opt, Eos) ->
     case re:run(Arg, Re) of
         {match, _X} -> list_to_binary(Arg);
@@ -670,6 +700,10 @@ minimax(Var, [{min, Min} | _], Eos, Opt) when Var < Min ->
     fail({invalid_argument, Eos#eos.commands, Opt, Var});
 minimax(Var, [{max, Max} | _], Eos, Opt) when Var > Max ->
     fail({invalid_argument, Eos#eos.commands, Opt, Var});
+minimax(Var, [Num | Tail], Eos, Opt) when is_number(Num) ->
+    lists:member(Var, [Num|Tail]) orelse
+        fail({invalid_argument, Eos#eos.commands, Opt, Var}),
+    Var;
 minimax(Var, [_ | Tail], Eos, Opt) ->
     minimax(Var, Tail, Eos, Opt).
 
@@ -704,11 +738,11 @@ is_digits(String) ->
     case string:to_integer(String) of
         {_Int, []} ->
             true;
-        {error, _} ->
+        {_, _} ->
             case string:to_float(String) of
                 {_Float, []} ->
                     true;
-                {error, _} ->
+                {_, _} ->
                     false
             end
     end.
@@ -725,6 +759,8 @@ default(#{type := float}) ->
     0.0;
 default(#{type := string}) ->
     "";
+default(#{type := binary}) ->
+    <<"">>;
 default(#{type := atom}) ->
     undefined;
 %% no type given, consider it 'undefined' atom
@@ -734,8 +770,6 @@ default(_) ->
 %% when parsing, state is stored in a reversed form
 %% when error needs to be formatted, command path should be
 %%  reversed and joined with " "
-format_path([]) ->
-    "";
 format_path(Commands) ->
     lists:concat(lists:join(" ", lists:reverse(Commands))) ++ ": ".
 
@@ -767,8 +801,12 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
         fail({invalid_command, clean_path(Path), help, "help must be a string"}),
     is_map(maps:get(commands, Cmd, #{})) orelse
         fail({invalid_command, clean_path(Path), commands, "sub-commands must be a map"}),
-    is_map_key(handler, Cmd) andalso (not is_function(maps:get(handler, Cmd))) andalso
-        fail({invalid_command, clean_path(Path), handler, "handler must be a function accepting single map argument"}),
+    case maps:get(handler, Cmd, optional) of
+        optional -> ok;
+        Fun when is_function(Fun, 1) -> ok;
+        _ -> fail({invalid_command, clean_path(Path), handler,
+            "handler must be a function accepting single map argument"})
+    end,
     Cmd1 =
         case maps:find(arguments, Cmd) of
             error ->
@@ -862,6 +900,8 @@ validate_type({string, Re} = Valid, _Path, _Opt) when is_list(Re) ->
 validate_type({string, Re, L} = Valid, _Path, _Opt) when is_list(Re), is_list(L) ->
     Valid;
 validate_type({binary, Re} = Valid, _Path, _Opt) when is_binary(Re) ->
+    Valid;
+validate_type({binary, Choices} = Valid, _Path, _Opt) when is_list(Choices), is_binary(hd(Choices)) ->
     Valid;
 validate_type({binary, Re, L} = Valid, _Path, _Opt) when is_binary(Re), is_list(L) ->
     Valid;
@@ -975,14 +1015,18 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) when ?IS_OP
     %% does it need an argument? look for nargs and action
     RequiresArg = requires_argument(Opt),
     %% long form always added to Opts
+    NonOption = maps:get(required, Opt, false) =:= true,
     {Name0, MaybeOpt0} =
         case maps:find(long, Opt) of
             error ->
                 {"", []};
+            {ok, Long} when NonOption, RequiresArg ->
+                FN = [Prefix | Long],
+                {FN, [format_required(true, FN ++ " ", Opt)]};
             {ok, Long} when RequiresArg ->
                 FN = [Prefix | Long],
                 {FN, [format_required(false, FN ++ " ", Opt)]};
-            {ok, Long} when map_get(required, Opt) =:= true ->
+            {ok, Long} when NonOption ->
                 FN = [Prefix | Long],
                 {FN, [[$ |FN]]};
             {ok, Long} ->
@@ -1029,6 +1073,10 @@ format_nargs(#{nargs := Dots}) when Dots =:= list; Dots =:= all; Dots =:= nonemp
 format_nargs(_) ->
     "".
 
+format_type(#{type := {int, Choices}}) when is_list(Choices), is_integer(hd(Choices)) ->
+    io_lib:format(", choice: ~s", [lists:join(", ", [integer_to_list(C) || C <- Choices])]);
+format_type(#{type := {float, Choices}}) when is_list(Choices), is_number(hd(Choices)) ->
+    io_lib:format(", choice: ~s", [lists:join(", ", [io_lib:format("~g", [C]) || C <- Choices])]);
 format_type(#{type := {Num, Valid}}) when Num =:= int; Num =:= float ->
     case {proplists:get_value(min, Valid), proplists:get_value(max, Valid)} of
         {undefined, undefined} ->
@@ -1040,9 +1088,16 @@ format_type(#{type := {Num, Valid}}) when Num =:= int; Num =:= float ->
         {Min, Max} ->
             io_lib:format(", ~tp < ~s < ~tp", [Min, Num, Max])
     end;
-format_type(#{type := Type}) when is_tuple(Type), (element(1, Type) =:= string orelse element(1, Type) =:= binary) ->
-    Re = element(2, Type),
-    io_lib:format(", ~s re: ~s", [Type, Re]);
+format_type(#{type := {string, Re, _}}) when is_list(Re), not is_list(hd(Re)) ->
+    io_lib:format(", string re: ~s", [Re]);
+format_type(#{type := {string, Re}}) when is_list(Re), not is_list(hd(Re)) ->
+    io_lib:format(", string re: ~s", [Re]);
+format_type(#{type := {binary, Re}}) when is_binary(Re) ->
+    io_lib:format(", binary re: ~s", [Re]);
+format_type(#{type := {binary, Re, _}}) when is_binary(Re) ->
+    io_lib:format(", binary re: ~s", [Re]);
+format_type(#{type := {StrBin, Choices}}) when StrBin =:= string orelse StrBin =:= binary, is_list(Choices) ->
+    io_lib:format(", choice: ~s", [lists:join(", ", [Choices])]);
 format_type(#{type := boolean}) ->
     "";
 format_type(#{type := Type}) when is_atom(Type) ->

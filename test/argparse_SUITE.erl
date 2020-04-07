@@ -1,6 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @author Maxim Fedorov
-%%% @copyright (C) 2019, Maxim Fedorov
+%%% @copyright (C) 2020, Maxim Fedorov <maximfca@mail.com>
 %%% @doc
 %%%  Tests for argparse library.
 %%% @end
@@ -17,6 +16,7 @@
     args/0, args/1,
     argparse/0, argparse/1,
     negative/0, negative/1,
+    nodigits/0, nodigits/1,
     python_issue_15112/0, python_issue_15112/1,
     type_validators/0, type_validators/1,
     error_format/0, error_format/1,
@@ -24,7 +24,8 @@
     very_short/0, very_short/1,
     multi_short/0, multi_short/1,
     usage/0, usage/1,
-    readme/0, readme/1
+    readme/0, readme/1,
+    error_usage/0, error_usage/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -37,8 +38,8 @@ suite() ->
 groups() ->
     [{parallel, [parallel], [
         basic, single_arg_built_in_types, complex_command, errors, args, argparse, negative,
-        python_issue_15112, type_validators, subcommand, error_format, very_short, multi_short,
-        usage, readme
+        nodigits,  python_issue_15112, type_validators, subcommand, error_format,
+        very_short, multi_short, usage, readme, error_usage
     ]}].
 
 all() ->
@@ -64,6 +65,52 @@ parse(Args, Command) ->
 
 parse_cmd(Args, Command) ->
     argparse:parse(string:lexemes(Args, " "), #{commands => Command}).
+
+%% ubiquitous command - contains *every* combination
+ubiq_cmd() ->
+    #{
+        arguments => [
+            #{name => r, short => $r, type => boolean, help => "recursive"},
+            #{name => f, short => $f, type => boolean, long => "-force", help => "force"},
+            #{name => v, short => $v, type => boolean, action => count, help => "verbosity level"},
+            #{name => interval, short => $i, type => {int, [{min, 1}]}, help => "interval set"},
+            #{name => weird, long => "-req", help => "required optional, right?"},
+            #{name => float, long => "-float", type => float, default => 3.14, help => "floating-point long form argument"}
+        ],
+        commands => #{
+            "start" => #{help => "verifies configuration and starts server",
+                arguments => [
+                    #{name => server, help => "server to start"},
+                    #{name => shard, short => $s, type => int, nargs => nonempty_list, help => "initial shards"},
+                    #{name => part, short => $p, type => int, nargs => list, help => "some parts"},
+                    #{name => z, short => $z, type => {int, [{min, 1}, {max, 10}]}, help => "between"},
+                    #{name => l, short => $l, type => {int, [{max, 10}]}, nargs => maybe, help => "maybe lower"},
+                    #{name => more, short => $m, type => {int, [{max, 10}]}, help => "less than 10"},
+                    #{name => optpos, required => false, type => {int, []}, help => "optional positional"},
+                    #{name => bin, short => $b, type => {binary, <<"m">>}, help => "binary with re"},
+                    #{name => g, short => $g, type => {binary, <<"m">>, []}, help => "binary with re"},
+                    #{name => t, short => $t, type => {string, "m"}, help => "string with re"},
+                    #{name => e, long => "--maybe-req", required => true, type => int, nargs => maybe, help => "maybe required int"},
+                    #{name => y, required => true, long => "-yyy", short => $y, type => {string, "m", []}, help => "string with re"},
+                    #{name => u, short => $u, type => {string, ["1", "2"]}, help => "string choices"},
+                    #{name => choice, short => $c, type => {int, [1,2,3]}, help => "tough choice"},
+                    #{name => fc, short => $q, type => {float, [2.1,1.2]}, help => "floating choice"},
+                    #{name => name, required => false, nargs => list, help => "extra name to pass"}
+                ], commands => #{
+                    "crawler" => #{arguments => [
+                        #{name => extra, long => "--extra", help => "extra option very deep"}
+                    ],
+                        help => "controls crawler behaviour"}}
+            },
+            "stop" => #{help => "stops running server", arguments => []
+            },
+            "status" => #{help => "prints server status", arguments => []
+            },
+            "restart" => #{help => "restarts server specified", arguments => [
+                #{name => server, help => "server to restart"}
+            ]}
+    }
+    }.
 
 %%--------------------------------------------------------------------
 %% Test Cases
@@ -195,7 +242,24 @@ type_validators(Config) when is_list(Config) ->
     %% funny non-atom-atom
     ArgMap = parse_opts("$can_never_be", [#{name => atom, type => {atom, unsafe}}]),
     ?assert(is_map_key(atom, ArgMap)), %% must be successful, but really we can't create an atom in code!
-    %% other validators?
+    %% choices: exceptions
+    ?assertException(error, {argparse, {invalid_argument, Prog, bin, "K"}},
+        parse_opts("K", [#{name => bin, type => {binary, [<<"M">>, <<"N">>]}}])),
+    ?assertException(error, {argparse, {invalid_argument, Prog, str, "K"}},
+        parse_opts("K", [#{name => str, type => {string, ["M", "N"]}}])),
+    ?assertException(error, {argparse, {invalid_argument, Prog, int, 12}},
+        parse_opts("12", [#{name => int, type => {int, [10, 11]}}])),
+    ?assertException(error, {argparse, {invalid_argument, Prog, float, 1.3}},
+        parse_opts("1.3", [#{name => float, type => {float, [1.2, 1.4]}}])),
+    %% choices: valid
+    ?assertEqual(#{bin => <<"K">>},
+        parse_opts("K", [#{name => bin, type => {binary, [<<"M">>, <<"K">>]}}])),
+    ?assertEqual(#{str => "K"},
+        parse_opts("K", [#{name => str, type => {string, ["K", "N"]}}])),
+    ?assertEqual(#{int => 12},
+        parse_opts("12", [#{name => int, type => {int, [10, 12]}}])),
+    ?assertEqual(#{float => 1.3},
+        parse_opts("1.3", [#{name => float, type => {float, [1.3, 1.4]}}])),
     ok.
 
 complex_command() ->
@@ -226,6 +290,24 @@ errors(Config) when is_list(Config) ->
         parse("", #{arguments => [#{name => one, short => $$}, #{name => two, short => $$}]})),
     ?assertException(error, {argparse, {invalid_option, _, two, "long conflicting with one"}},
         parse("", #{arguments => [#{name => one, long => "a"}, #{name => two, long => "a"}]})),
+    %% broken options
+    ?assertException(error, {argparse, {invalid_option, _, one, long, _}},
+        parse("", #{arguments => [#{name => one, long => ok}]})),
+    ?assertException(error, {argparse, {invalid_option, _, one, short, _}},
+        parse("", #{arguments => [#{name => one, short => ok}]})),
+    ?assertException(error, {argparse, {invalid_option, _, one, required, _}},
+        parse("", #{arguments => [#{name => one, required => ok}]})),
+    ?assertException(error, {argparse, {invalid_option, _, one, help, _}},
+        parse("", #{arguments => [#{name => one, help => ok}]})),
+    %% broken commands
+    ?assertException(error, {argparse, {invalid_command, _, commands, _}},
+        parse("", #{commands => ok})),
+    ?assertException(error, {argparse, {invalid_command, _, commands, _}},
+        parse("", #{commands => #{ok => #{}}})),
+    ?assertException(error, {argparse, {invalid_command, _, help, _}},
+        parse("", #{commands => #{"ok" => #{help => ok}}})),
+    ?assertException(error, {argparse, {invalid_command, _, handler, _}},
+        parse("", #{commands => #{"ok" => #{handler => fun errors/0}}})),
     %% unknown option at the top of the path
     ?assertException(error, {argparse, {unknown_argument, Prog, "arg"}},
         parse_cmd(["arg"], #{})),
@@ -282,12 +364,11 @@ args(Config) when is_list(Config) ->
     ?assertEqual(#{extra => "X", arg => ["b","c"]},
         parse_opts(["-x port -x a b c -x X"], OptsPos1)),
     %% positional arguments consumption, any number (maybe zero)
-    OptsPos2 = [
+    OptsPos2 = #{arguments => [
         #{name => arg, nargs => list},
         #{name => extra, short => $x}
-    ],
-    ?assertEqual(#{extra => "X", arg => ["a","b","c"]},
-        parse_opts(["-x port a b c -x X"], OptsPos2)),
+    ]},
+    ?assertEqual(#{extra => "X", arg => ["a","b","c"]}, parse(["-x port a b c -x X"], OptsPos2)),
     %% positional: consume ALL arguments!
     OptsAll = [
         #{name => arg, nargs => all},
@@ -306,9 +387,18 @@ args(Config) when is_list(Config) ->
         parse_opts(["XX --foo"], OptMaybe)),
     ?assertEqual(#{foo => d, bar => d},
         parse_opts([""], OptMaybe)),
+    %% maybe with default
+    ?assertEqual(#{foo => d, bar => "XX", baz => ok},
+        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, default => ok} | OptMaybe])),
     %% maybe arg - with no default given
     ?assertEqual(#{foo => d, bar => "XX", baz => 0},
-        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => int} | OptMaybe])).
+        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => int} | OptMaybe])),
+    ?assertEqual(#{foo => d, bar => "XX", baz => ""},
+        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => string} | OptMaybe])),
+    ?assertEqual(#{foo => d, bar => "XX", baz => undefined},
+        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => atom} | OptMaybe])),
+    ?assertEqual(#{foo => d, bar => "XX", baz => <<"">>},
+        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => binary} | OptMaybe])).
 
 argparse() ->
     [{doc, "Tests examples from argparse Python library"}].
@@ -382,7 +472,30 @@ negative(Config) when is_list(Config) ->
 
     %% negative number options present, so both -1s are options
     ?assertException(error, {argparse, {missing_argument,_,one}}, parse("-1 -1", Parser2)),
-    ok.
+    %% no "-" prefix, can only be an integer
+    ?assertEqual(#{foo => "-1"}, argparse:parse(["-1"], Parser2, #{prefixes => "+"})),
+    %% no "-" prefix, can only be an integer, but just one integer!
+    ?assertException(error, {argparse, {unknown_argument, _, "-1"}},
+        argparse:parse(["-2", "-1"], Parser2, #{prefixes => "+"})),
+    %% just in case, floats work that way too...
+    ?assertException(error, {argparse, {unknown_argument, _, "-2"}},
+        parse("-2", #{arguments => [#{name => one, long => "1.2"}]})).
+
+nodigits() ->
+    [{doc, "Test prefixes and negative numbers together"}].
+
+nodigits(Config) when is_list(Config) ->
+    %% verify nodigits working as expected
+    Parser3 = #{arguments => [
+        #{name => extra, short => $3},
+        #{name => arg, nargs => list}
+    ]},
+    %% ensure not to consume optional prefix
+    ?assertEqual(#{extra => "X", arg => ["a","b","3"]},
+        argparse:parse(string:lexemes("-3 port a b 3 +3 X", " "), Parser3, #{prefixes => "-+"})).
+    %% verify split_to_option working with weird prefix
+    %?assertEqual(#{extra => "X", arg => ["a","b","-3"]},
+    %    argparse:parse(string:lexemes("-3 port a b -3 -3 X", " "), Parser3, #{prefixes => "-+"})).
 
 python_issue_15112() ->
     [{doc, "Tests for https://bugs.python.org/issue15112"}].
@@ -481,35 +594,23 @@ multi_short(Config) when is_list(Config) ->
 usage() ->
     [{doc, "Tests help formatter"}].
 
+%% This test does not verify usage printed,
+%%  but at least ensures formatter does not crash.
 usage(Config) when is_list(Config) ->
-    Cmd = #{
-        arguments => [
-            #{name => r, short => $r, type => boolean, help => "recursive"},
-            #{name => f, short => $f, type => boolean, long => "-force", help => "force"},
-            #{name => v, short => $v, type => boolean, action => count, help => "verbosity level"},
-            #{name => interval, short => $i, type => {int, [{min, 1}]}, help => "interval set"},
-            #{name => float, long => "-float", type => float, help => "floating-point long form argument"}
-        ], commands => #{
-            "start" => #{help => "verifies configuration and starts server", arguments => [
-                    #{name => server, help => "server to start"},
-                    #{name => shard, short => $s, type => int, nargs => nonempty_list, help => "initial shards"},
-                    #{name => part, short => $p, type => int, nargs => list, help => "some parts"},
-                    #{name => name, required => false, nargs => list, help => "extra name to pass"}
-                ], commands => #{
-                    "crawler" => #{arguments => [
-                            #{name => extra, long => "--extra", help => "extra option very deep"}
-                        ],
-                        help => "controls crawler behaviour"}
-                }},
-            "stop" => #{help => "stops running server", arguments => []
-            },
-            "status" => #{help => "prints server status", arguments => []
-            },
-            "restart" => #{help => "restarts server specified", arguments => [
-                #{name => server, help => "server to restart"}
-            ]}
-        }
-    },
+    Cmd = ubiq_cmd(),
     ct:pal("~s", [argparse:help(Cmd, #{command => ["start"]})]),
-    ct:pal("~s", [argparse:help(Cmd, #{})]),
+    ct:pal("~s", [argparse:help(Cmd)]),
+    ok.
+
+error_usage() ->
+    [{doc, "Test that usage information is added to errors"}].
+
+%% This test does not verify usage printed,
+%%  but at least ensures formatter does not crash.
+error_usage(Config) when is_list(Config) ->
+    try parse("start -rf", ubiq_cmd())
+    catch error:{argparse, Reason} ->
+        Actual = argparse:format_error(Reason, ubiq_cmd(), #{}),
+        ct:pal("error: ~s", [Actual])
+    end,
     ok.

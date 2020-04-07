@@ -113,7 +113,7 @@ run_impl(Args, Modules, Warn) ->
             %%  and call it
             find_ctl(Modules, CmdMap, ArgMap)
     catch error:{argparse, Reason} ->
-        Fmt = argparse:format_error(Reason, CmdMap),
+        Fmt = argparse:format_error(Reason, CmdMap, #{}),
         io:format("error: ~s", [Fmt])
     end.
 

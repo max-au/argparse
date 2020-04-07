@@ -263,6 +263,14 @@ line input.
  * {atom, unsafe} - atom, creates new atoms when needed
  * {custom, Fun} - custom type conversion from string() into term()
 
+For int, float, string, binary and atom, it is also possible to specify list of
+choices that will pass validation:
+
+    #{name => choices, short => $c, type => {string, ["one", "two", "three"]}}
+
+Custom function may throw ```erlang:error(invalid_argument)```, to utilise built-in
+validation information. If any other exception is raised, it is passed with no conversion.
+
 An error is thrown when argument cannot be converted to required type, or does not pass validation.
 If custom conversion function throws error(invalid_argument), exception is augmented with necessary
 parser state information (any other exception passes through unchanged).
@@ -279,7 +287,7 @@ To get human-readable representation:
 
     try argparse:parse(Args, Command)
     catch error:{argparse, Reason} ->
-        io:format(argparse:format_error(Reason, Command))
+        io:format(argparse:format_error(Reason, Command, #{}))
     end.
 
 
@@ -295,10 +303,10 @@ rebar3.
 ## Expected features
 
 To be implemented in 1.0.0:
-* more usage printing options
-* choices validation
+* help/usage in cli
 
 To be considered after 1.0.0:
+* search for commands and arguments (mini-man)
 * abbreviated long forms
 * mutual exclusion groups
 * support templates in help lines
