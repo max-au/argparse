@@ -17,7 +17,7 @@ CLI framework is naturally suitable for building small escript-based application
     -mode(compile). %% evaluated module cannot contain callbacks
     
     main(Args) ->
-        cli:run(Args).
+        cli:run(Args, #{progname => "erm").
     
     cli() ->
         #{arguments => [
@@ -29,6 +29,19 @@ CLI framework is naturally suitable for building small escript-based application
     cli(#{force := Force, recursive := Recursive, dir := Dir}) ->
         io:format("Removing ~s (force ~s, recursive: ~s)~n",
             [Dir, Force, Recursive]).
+
+The example above does not have sub-commands, and implements optional cli/1
+callback, that serves as an entry point with parsed arguments. Help options are
+added automatically:
+
+    [max-au@localhost ebin]$ ./erm --help
+    usage: erm [-fr] <dir>
+
+    Optional arguments:
+      dir
+      -r  , [false]
+      -f  , [false]
+
 
 ## CLI with multiple commands
 

@@ -398,7 +398,11 @@ args(Config) when is_list(Config) ->
     ?assertEqual(#{foo => d, bar => "XX", baz => undefined},
         parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => atom} | OptMaybe])),
     ?assertEqual(#{foo => d, bar => "XX", baz => <<"">>},
-        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => binary} | OptMaybe])).
+        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => binary} | OptMaybe])),
+    %% nargs: optional list, yet it still needs to be 'not required'!
+    OptList = [#{name => arg, nargs => list, required => false, type => int}],
+    ?assertEqual(#{}, parse_opts("", OptList)),
+    ok.
 
 argparse() ->
     [{doc, "Tests examples from argparse Python library"}].

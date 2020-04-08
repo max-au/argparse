@@ -8,6 +8,7 @@
 %%%  * boolean flag (option), automatically using {store, true}
 %%%  * all positional arguments are required by default (even 'maybe')
 %%%  * first-class (sub) commands, slightly differently from argparse
+%%%  * implicit --help/-h is not a part of argparse (but implemented in cli)
 %%%
 %%% Commands vs. positional arguments: command always takes precedence
 %%%  over positional argument.
@@ -811,6 +812,8 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
         case maps:find(arguments, Cmd) of
             error ->
                 Cmd;
+            {ok, Opts} when not is_list(Opts) ->
+                fail({invalid_command, clean_path(Path), commands, "options must be a list"});
             {ok, Opts} ->
                 Cmd#{arguments => [validate_option(Path, Opt) || Opt <- Opts]}
         end,
@@ -1011,7 +1014,7 @@ maybe_add(ToAdd, List) ->
 %% format optional argument
 format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) when ?IS_OPTIONAL(Opt) ->
     Desc = lists:flatten(io_lib:format("~s~s~s",
-        [maps:get(help, Opt, ""), format_type(Opt), format_default(Opt)])),
+        [get_help(Opt), format_type(Opt), format_default(Opt)])),
     %% does it need an argument? look for nargs and action
     RequiresArg = requires_argument(Opt),
     %% long form always added to Opts
@@ -1058,6 +1061,11 @@ format_opt_help(#{name := Name} = Opt, {Prefix, Longest, Flags, Opts, Args, OptL
     LName = io_lib:format("~s", [Name]),
     LPos = format_required(maps:get(required, Opt, true), "", Opt),
     {Prefix, max(Longest, length(LName)), Flags, Opts, Args ++ LPos, [{LName, Desc}|OptLines]}.
+
+get_help(#{help := Help}) ->
+    Help;
+get_help(#{name := Name}) ->
+    io_lib:format("~s", [Name]).
 
 %% option formatting helpers
 maybe_concat(No, []) -> No;
