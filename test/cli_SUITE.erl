@@ -23,14 +23,16 @@
     auto_help/0, auto_help/1,
     bare_cli/0, bare_cli/1,
     multi_module/0, multi_module/1,
-    warnings/0, warnings/1
+    warnings/0, warnings/1,
+    simple/0, simple/1
 ]).
 
 %% Internal exports
 -export([
     cli/0,
     sum/1,
-    cos/1
+    cos/1,
+    mul/2
 ]).
 
 -behaviour(cli).
@@ -110,9 +112,19 @@ cli() ->
                     #{name => num, nargs => nonempty_list, type => int, help => "Numbers to sum"}
                 ]
             },
-            "cos" => #{
+            "math" => #{
+                commands => #{
+                    "sin" => #{},
+                    "cos" => #{}
+                    },
                 arguments => [
                     #{name => in, type => float, help => "Input value"}
+                ]
+            },
+            "mul" => #{
+                arguments => [
+                    #{name => left, type => int},
+                    #{name => right, type => int}
                 ]
             }
         }
@@ -127,6 +139,9 @@ sum(#{num := Nums}) ->
 cos(#{in := In}) ->
     math:cos(In).
 
+mul(Left, Right) ->
+    Left * Right.
+
 %%--------------------------------------------------------------------
 %% TEST CASES
 
@@ -134,8 +149,9 @@ test_cli() ->
     [{doc, "Tests CLI commands"}].
 
 test_cli(Config) when is_list(Config) ->
+    ?assertEqual(math:cos(3.14), cli:run(["math", "cos", "3.14"])),
+    ?assertEqual(9, cli:run(["mul", "3", "3"], #{modules => [?MODULE], default => undefined})),
     ?assertEqual(4, cli:run(["sum", "2", "2"])),
-    ?assertEqual(math:cos(3.14), cli:run(["cos", "3.14"])),
     ?assertEqual(6, cli:run(["sum", "3", "3"], #{modules => ?MODULE})),
     ?assertEqual(6, cli:run(["sum", "3", "3"], #{modules => [?MODULE]})),
     Expected = "error: erm sum: required argument missing: num\nusage: erm",
@@ -146,7 +162,7 @@ auto_help() ->
     [{doc, "Tests automatic --help and -h switch"}].
 
 auto_help(Config) when is_list(Config) ->
-    Expected = "usage: erm  {cos|sum}\n\nSubcommands:\n  sum \n  cos \n",
+    Expected = "usage: erm  {math|mul|sum}\n\nSubcommands:\n  math \n  mul  \n  sum  \n",
     ?assertEqual({ok, Expected}, capture_output(fun () -> cli:run(["--help"], #{progname => "erm"}) end)).
 
 bare_cli() ->
@@ -184,3 +200,17 @@ warnings(Config) when is_list(Config) ->
     ?assertNotEqual(nomatch, string:find(IO, "unrecognised argument: sum")),
     %% ensure no log line added
     {ok, IO} = capture_output(fun () -> cli:run(["sum"], #{modules => nomodule, warn => suppress}) end).
+
+simple() ->
+    [{doc, "Runs simple example from examples"}].
+
+simple(Config) when is_list(Config) ->
+    CliRet = "#{arguments => [#{name => force, short => $f, type => boolean, default => false},"
+        "#{name => recursive, short => $r, type => boolean, default => false},"
+        "#{name => dir}]}",
+    FunExport = "cli/3",
+    FunDefs = "cli(Force, Recursive, Dir) -> io:format(\"Removing ~s (force: ~s, recursive: ~s)~n\",   [Dir, Force, Recursive]).",
+    cli_module(simple, CliRet, FunExport, [FunDefs]),
+    {ok, IO} = capture_output(fun () -> cli:run(["4"], #{modules => simple, default => undefined}) end),
+    ct:pal("~s", [IO]),
+    ?assertEqual("Removing 4 (force: false, recursive: false)\n", IO).

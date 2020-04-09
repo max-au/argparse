@@ -1,0 +1,8 @@
+{application, multi,
+ [{description, "multi: example CLI application"},
+  {vsn, "0.1.0"},
+  {applications,
+   [kernel,
+    stdlib
+   ]}
+ ]}.

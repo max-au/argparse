@@ -143,22 +143,22 @@ basic() ->
 
 basic(Config) when is_list(Config) ->
     %% empty command, with full options path
-    ?assertEqual({#{}, {"cmd",#{}}},
+    ?assertMatch({#{}, {["cmd"],#{}}},
         argparse:parse(["cmd"], #{commands => #{"cmd" => #{}}}, #{result => full})),
     %% sub-command, with no path, but user-supplied argument
-    ?assertEqual({#{},{"sub",#{attr => pos}}},
+    ?assertEqual({#{},{["cmd", "sub"],#{attr => pos}}},
         argparse:parse(["cmd", "sub"], #{commands => #{"cmd" => #{commands => #{"sub" => #{attr => pos}}}}})),
     %% command with positional argument
     PosCmd = #{arguments => [#{name => pos}]},
-    ?assertEqual({#{pos => "arg"}, {"cmd", PosCmd}},
+    ?assertEqual({#{pos => "arg"}, {["cmd"], PosCmd}},
         argparse:parse(["cmd", "arg"], #{commands => #{"cmd" => PosCmd}})),
     %% command with optional argument
     OptCmd = #{arguments => [#{name => force, short => $f, type => boolean}]},
-    ?assertEqual({#{force => true}, {"rm", OptCmd}},
+    ?assertEqual({#{force => true}, {["rm"], OptCmd}},
         parse(["rm -f"], #{commands => #{"rm" => OptCmd}}), "rm -f"),
     %% command with optional and positional argument
     PosOptCmd = #{arguments => [#{name => force, short => $f, type => boolean}, #{name => dir}]},
-    ?assertEqual({#{force => true, dir => "dir"}, {"rm", PosOptCmd}},
+    ?assertEqual({#{force => true, dir => "dir"}, {["rm"], PosOptCmd}},
         parse(["rm -f dir"], #{commands => #{"rm" => PosOptCmd}}), "rm -f dir"),
     %% no command, just argument list
     Kernel = #{name => kernel, long => "kernel", type => atom, nargs => 2},
@@ -182,6 +182,7 @@ single_arg_built_in_types(Config) when is_list(Config) ->
     %% integer tests
     Int = #{arguments => [#{name => int, type => int, short => $i, long => "-int"}]},
     ?assertEqual(#{int => 1}, parse([" -i 1"], Int)),
+    ?assertException(error, {argparse,{invalid_argument,["erl"],int,"1,"}}, parse([" -i 1, 3"], Int)),
     ?assertEqual(#{int => 1}, parse(["--int 1"], Int)),
     ?assertEqual(#{int => -1}, parse(["-i -1"], Int)),
     %% floating point
@@ -278,7 +279,7 @@ complex_command(Config) when is_list(Config) ->
     CmdMap = #{commands => #{"start" => Command}},
     Parsed = argparse:parse(string:lexemes("start --float 1.04 -f 112 -b -b -s s1 42 --string s2 s3 s4", " "), CmdMap),
     Expected = #{float => [1.04, 112], boolean => [true, true], integer => 42, string => ["s1", "s2", "s3", "s4"]},
-    ?assertEqual({Expected, {"start", Command}}, Parsed).
+    ?assertEqual({Expected, {["start"], Command}}, Parsed).
 
 errors() ->
     [{doc, "Tests for various errors, missing arguments etc"}].
@@ -526,7 +527,7 @@ subcommand(Config) when is_list(Config) ->
             commands => #{
                 "two" => TwoCmd}}}},
     ?assertEqual(
-        {#{force => true, baz => "N1O1O", foo => true, bar => "bar"}, {"two", TwoCmd}},
+        {#{force => true, baz => "N1O1O", foo => true, bar => "bar"}, {["one", "two"], TwoCmd}},
         parse("one N1O1O -f two --foo bar", Cmd)),
     %% it is an error not to choose subcommand
     ?assertException(error, {argparse, {missing_argument,_,[]}},

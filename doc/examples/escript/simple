@@ -1,0 +1,21 @@
+#!/usr/bin/env escript
+
+%% simple cli using cli behaviour
+
+-behaviour(cli).
+-mode(compile).
+-export([cli/0, cli/3]).
+
+main(Args) ->
+    cli:run(Args, #{progname => "simple", default => undefined}).
+
+cli() ->
+    #{arguments => [
+        #{name => force, short => $f, type => boolean, default => false},
+        #{name => recursive, short => $r, type => boolean, default => false},
+        #{name => dir}
+    ]}.
+
+cli(Force, Recursive, Dir) ->
+    io:format("Removing ~s (force: ~s, recursive: ~s)~n",
+        [Dir, Force, Recursive]).

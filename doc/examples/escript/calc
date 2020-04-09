@@ -1,0 +1,47 @@
+#!/usr/bin/env escript
+
+%% calculator, demonstrating sub-commands, and handler specifications
+
+-behaviour(cli).
+-mode(compile).
+-export([cli/0, sum/1, cos/1, mul/1]).
+
+main(Args) ->
+    Out = cli:run(Args, #{progname => "calc"}),
+    Out =/= ok andalso io:format("~p~n", [Out]).
+
+cli() ->
+    #{
+        commands => #{
+            "sum" => #{
+                arguments => [
+                    #{name => num, nargs => nonempty_list, type => int, help => "Numbers to sum"}
+                ]
+            },
+            "math" => #{
+                commands => #{
+                    "sin" => #{handler => {math, sin, undefined}},
+                    "cos" => #{},
+                    "tan" => #{handler => {math, tan, undefined}}
+                },
+                arguments => [
+                    #{name => in, type => float, help => "Input value"}
+                ]
+            },
+            "mul" => #{
+                arguments => [
+                    #{name => left, type => int},
+                    #{name => right, type => int}
+                ]
+            }
+        }
+    }.
+
+sum(#{num := Nums}) ->
+    lists:sum(Nums).
+
+cos(#{in := In}) ->
+    math:cos(In).
+
+mul(#{left := Left, right := Right}) ->
+    Left * Right.

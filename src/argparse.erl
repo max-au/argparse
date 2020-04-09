@@ -135,8 +135,18 @@
 %% Supplied to command handler
 -type arg_map() :: #{term() => term()}.
 
-%% Command handler. May produce some output.
--type handler() :: fun((arg_map()) -> term()).
+%% Command handler. May produce some output. Can accept a map, or be
+%%  arbitrary mfa() for handlers accepting positional list.
+%% Special value 'optional' may be used to suppress an error that
+%%  otherwise raised when command contains sub-commands, but arguments
+%%  supplied via command line do not select any.
+-type handler() ::
+    optional |                          %% valid for commands with sub-commands, suppresses error when no
+                                        %%   sub-command is selected
+    fun((arg_map()) -> term()) |        %% handler accepting arg_map
+    {module(), Fn :: atom()} |          %% handler, accepting arg_map, Fn exported from module()
+    {fun((arg_map()) -> term()), term()} |  %% handler, positional form
+    {module(), atom(), term()}.         %% handler, positional form, exported from module()
 
 %% Sub-commands are arranged into maps (cannot start with prefix)
 -type command_map() :: #{string() => command()}.
@@ -369,7 +379,7 @@ parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, po
         [_|_] ->
             %% otherwise return argument map, command path taken, and the
             %%  last command matched (usually it contains a handler to run)
-            {ArgMap3, {hd(Eos#eos.commands), Eos#eos.current}}
+            {ArgMap3, {tl(lists:reverse(Eos#eos.commands)), Eos#eos.current}}
     end.
 
 %% @private
@@ -714,7 +724,7 @@ get_int(Arg, Opt, Eos) ->
     case string:to_integer(Arg) of
         {Int, []} ->
             Int;
-        {error, _Reason} ->
+        _ ->
             fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end.
 
@@ -724,12 +734,12 @@ get_float(Arg, Opt, Eos) ->
     case string:to_float(Arg) of
         {Float, []} ->
             Float;
-        {error, _Reason} ->
+        _ ->
             %% possibly in disguise
             case string:to_integer(Arg) of
                 {Int, []} ->
                     Int;
-                {error, _IntReason} ->
+                _ ->
                     fail({invalid_argument, Eos#eos.commands, Opt, Arg})
             end
     end.
@@ -804,9 +814,12 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
         fail({invalid_command, clean_path(Path), commands, "sub-commands must be a map"}),
     case maps:get(handler, Cmd, optional) of
         optional -> ok;
+        {Mod, ModFun} when is_atom(Mod), is_atom(ModFun) -> ok; %% map form
+        {Mod, ModFun, _} when is_atom(Mod), is_atom(ModFun) -> ok; %% positional form
+        {Fun, _} when is_function(Fun) -> ok; %% positional form
         Fun when is_function(Fun, 1) -> ok;
         _ -> fail({invalid_command, clean_path(Path), handler,
-            "handler must be a function accepting single map argument"})
+            "handler must be a fun(ArgMap), {Mod, Fun}, {fun(...), Default}, {Mod, Fun, Default} or 'optional'"})
     end,
     Cmd1 =
         case maps:find(arguments, Cmd) of
@@ -875,12 +888,18 @@ maybe_validate(_Key, Map, _Fun, _Path) ->
     Map.
 
 %% validate action field
-validate_action(store, _Path, _Opt) -> store;
-validate_action({store, Term}, _Path, _Opt) -> {store, Term};
-validate_action(append, _Path, _Opt) -> append;
-validate_action({append, Term}, _Path, _Opt) -> {append, Term};
-validate_action(count, _Path, _Opt) -> count;
-validate_action(extend, _Path, _Opt) -> extend;
+validate_action(store, _Path, _Opt) ->
+    store;
+validate_action({store, Term}, _Path, _Opt) ->
+    {store, Term};
+validate_action(append, _Path, _Opt) ->
+    append;
+validate_action({append, Term}, _Path, _Opt) ->
+    {append, Term};
+validate_action(count, _Path, _Opt) ->
+    count;
+validate_action(extend, _Path, _Opt) ->
+    extend;
 validate_action(_Action, Path, #{name := Name}) ->
     fail({invalid_option, clean_path(Path), Name, action, "unsupported"}).
 
@@ -970,12 +989,12 @@ format_help({CmdName, Root}, Format) ->
         end, {Longest, []}, Immediate),
     %% format sub-commands
     SubFormat = io_lib:format("  ~~-~bs ~~s~n", [Long]),
-    Commands = lists:concat([io_lib:format(SubFormat, [N, D]) || {N, D} <- Subs]),
+    Commands = lists:concat([io_lib:format(SubFormat, [N, D]) || {N, D} <- lists:reverse(Subs)]),
     ShortCmd =
         case map_size(Immediate) of
             0 ->
                 "";
-            Small when Small < 3 ->
+            Small when Small < 4 ->
                 " " ++ lists:concat(lists:join(" ", Nested)) ++  " {" ++
                     lists:concat(lists:join("|", maps:keys(Immediate))) ++ "}";
             _Largs ->
@@ -989,7 +1008,7 @@ format_help({CmdName, Root}, Format) ->
     ArgsForm = Args,
     %% format extended view
     OptFormat = io_lib:format("  ~~-~bs ~~s~n", [Longest]),
-    FormOpts = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- OptLines],
+    FormOpts = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- lists:reverse(OptLines)],
     %% format first usage line
     lists:flatten(io_lib:format("usage: ~s~s~s~s~s~n~s~s", [CmdName, ShortCmd, FlagsForm, OptsForm, ArgsForm,
         maybe_add("~nSubcommands:~n~s", Commands), maybe_add("~nOptional arguments:~n~s", FormOpts)])).

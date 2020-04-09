@@ -1,0 +1,17 @@
+#!/usr/bin/env escript
+
+%% argparse example, without cli behaviour used
+
+main(Args) ->
+    #{force := Force, recursive := Recursive, dir := Dir} =
+        argparse:parse(Args, cli()),
+    io:format("Removing ~s (force: ~s, recursive: ~s)~n",
+        [Dir, Force, Recursive]).
+
+%% parser specification
+cli() ->
+    #{arguments => [
+        #{name => force, short => $f, type => boolean, default => false},
+        #{name => recursive, short => $r, type => boolean, default => false},
+        #{name => dir}
+    ]}.

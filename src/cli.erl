@@ -11,6 +11,11 @@
 %%%
 %%% Warnings are printed to OTP logger, unless suppressed.
 %%%
+%%% cli framework attempts to create a handler for each
+%%%     command exported, including intermediate (non-leaf)
+%%%     commands, if it can find function exported with
+%%%     suitable signature.
+%%%
 %%% @end
 %%%
 
@@ -66,11 +71,14 @@ run(Args) ->
 %% 'warn' set to 'suppress' suppresses warnings logged
 %% 'help' set to false suppresses printing 'usage' when parser produces
 %%      an error, and disabled default --help/-h behaviour
+%% 'handler' controls which handler form is going to be used to generate
+%%      default handler, and value to use for missing arguments
 -type run_options() :: #{
     modules => all_loaded | module() | [module()],
     warn => suppress | warn,
     help => boolean(),
-    prefixes => [integer()],%% prefixes
+    default => term(),
+    prefixes => [integer()],%% prefixes passed to argparse
     progname => string()    %% specifies executable name instead of 'erl'
 }.
 
@@ -81,10 +89,8 @@ run(Args) ->
 -spec run([string()], run_options()) -> term().
 run(Args, Options) ->
     ParserOptions = copy_options([prefixes, progname], Options, #{}),
-    run_impl(Args,
-        modules(maps:get(modules, Options, all_loaded)),
-        maps:get(warn, Options, warn),
-        ParserOptions, maps:get(help, Options, false)).
+    run_impl(Args, ParserOptions,
+        modules(maps:get(modules, Options, all_loaded)), Options).
 
 %%--------------------------------------------------------------------
 %% Internal implementation
@@ -122,7 +128,10 @@ behaviours(Module) ->
 
 %% @private
 %% Dispatches Args over Modules, with specified ErrMode
-run_impl(Args, Modules, Warn, ArgOpts, HelpEnabled) ->
+run_impl(Args, ArgOpts, Modules, Options) ->
+    Warn = maps:get(warn, Options, warn),
+    HelpEnabled = maps:get(help, Options, false),
+    ModCount = length(Modules),
     CmdMap = lists:foldl(
         fun (Mod, Cmds) ->
             ModCmd =
@@ -134,18 +143,38 @@ run_impl(Args, Modules, Warn, ArgOpts, HelpEnabled) ->
                         _:_ when Warn =:= suppress ->
                             #{}
                 end,
-            Cmds1 = merge_arguments(maps:get(arguments, ModCmd, []), Cmds),
-            merge_commands(maps:get(commands, ModCmd, #{}), Mod, Warn, Cmds1)
+            %% merge arguments, and warn if warnings are not suppressed, and there
+            %%  is more than a single module
+            Cmds1 = merge_arguments(maps:get(arguments, ModCmd, []),
+                (ModCount > 1 andalso Warn =:= warn), Cmds),
+            %% merge commands
+            merge_commands(maps:get(commands, ModCmd, #{}), Mod, Options, Cmds1)
         end, #{}, Modules),
     %% attempt to dispatch the command
     try argparse:parse(Args, CmdMap, ArgOpts) of
-        {ArgMap, {_Command, #{handler := Handler}}} ->
+        {ArgMap, {Path, #{handler := {Mod, ModFun, Default}}}} ->
+            ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),
+            %% if argument count may not match, better error can be produced
+            erlang:apply(Mod, ModFun, ArgList);
+        {ArgMap, {_Path, #{handler := {Mod, ModFun}}}} when is_atom(Mod), is_atom(ModFun) ->
+            Mod:ModFun(ArgMap);
+        {ArgMap, {Path, #{handler := {Fun, Default}}}} when is_function(Fun) ->
+            ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),
+            %% if argument count may not match, better error can be produced
+            erlang:apply(Fun, ArgList);
+        {ArgMap, {_Path, #{handler := Handler}}} when is_function(Handler, 1) ->
             Handler(ArgMap);
         ArgMap ->
             %% simple CLI with no sub-commands?
-            %% find any module of Modules, exporting cli/1,
-            %%  and call it
-            find_ctl(Modules, CmdMap, ArgMap, ArgOpts)
+            case maps:find(default, Options) of
+                error ->
+                    %% find any module of Modules, exporting cli/1,
+                    %%  and call it
+                    exec_cli(Modules, CmdMap, [ArgMap], ArgOpts);
+                {ok, Default} ->
+                    ArgList = arg_map_to_arg_list(CmdMap, [], ArgMap, Default),
+                    exec_cli(Modules, CmdMap, ArgList, ArgOpts)
+            end
     catch
         error:{argparse, Reason} when HelpEnabled ->
             io:format("error: ~s", [argparse:format_error(Reason)]);
@@ -164,49 +193,82 @@ run_impl(Args, Modules, Warn, ArgOpts, HelpEnabled) ->
 
 %% @private
 %% finds first module that exports ctl/1 and execute it
-find_ctl([], CmdMap, _ArgMap, ArgOpts) ->
+exec_cli([], CmdMap, _ArgMap, ArgOpts) ->
     %% command not found, let's print usage
     io:format(argparse:help(CmdMap, ArgOpts));
-find_ctl([Mod|Tail], CmdMap, ArgMap, ArgOpts) ->
-    case erlang:function_exported(Mod, cli, 1) of
+exec_cli([Mod|Tail], CmdMap, Args, ArgOpts) ->
+    case erlang:function_exported(Mod, cli, length(Args)) of
         true ->
-            Mod:cli(ArgMap);
+            erlang:apply(Mod, cli, Args);
         false ->
-            find_ctl(Tail, CmdMap, ArgMap, ArgOpts)
+            exec_cli(Tail, CmdMap, Args, ArgOpts)
     end.
 
 %% @private
 %% argparse does not allow clashing options, so if cli is ever to support
 %%  that, logic to un-clash should be here
-merge_arguments([], Existing) ->
+merge_arguments([], _Warn, Existing) ->
     Existing;
-merge_arguments(Args, Existing) ->
+merge_arguments(Args, Warn, Existing) ->
+    Warn andalso
+        ?LOG_WARNING("cli: multiple modules may export global attributes: ~p", [Args]),
     ExistingArgs = maps:get(arguments, Existing, []),
     Existing#{arguments => ExistingArgs ++ Args}.
 
 %% @private
 %% argparse accepts a map of commands, which means, commands names
-%%  can never clash. Yet for cli it is possible - resolve conflict here.
+%%  can never clash. Yet for cli it is possible when multiple modules
+%%  export command with the same name. For this case, skip duplicate
+%%  command names, emitting a warning.
 merge_commands([], _, _, Existing) ->
     Existing;
-merge_commands(Cmds, Mod, Warn, Existing) ->
+merge_commands(Cmds, Mod, Options, Existing) ->
+    Warn = maps:get(warn, Options, warn),
     MergedCmds = maps:fold(
         fun (Name, Cmd, Acc) ->
             case maps:find(Name, Acc) of
-                error when is_map_key(handler, Cmd) ->
-                    Acc#{Name => Cmd#{mod => Mod}};
                 error ->
-                    FunAtom = list_to_existing_atom(Name),
-                    Acc#{Name => Cmd#{handler => fun(AM) -> Mod:FunAtom(AM) end}};
+                    %% merge command with name Name into Acc-umulator
+                    Acc#{Name => create_handlers(Mod, Name, Cmd, maps:find(default, Options))};
                 {ok, Another} when Warn =:= warn ->
+                    %% do not merge this command, another module already exports it
                     ?LOG_WARNING("cli: duplicate definition for ~s found, skipping ~P",
                         [Name, 8, Another]), Acc;
                 {ok, _Another} when Warn =:= suppress ->
+                    %% don't merge duplicate, and don't complain about it
                     Acc
             end
         end, maps:get(commands, Existing, #{}), Cmds
     ),
     Existing#{commands => MergedCmds}.
+
+%% @private
+%% Descends into sub-commands creating handlers where applicable
+create_handlers(Mod, CmdName, Cmd0, DefaultTerm) ->
+    Handler =
+        case maps:find(handler, Cmd0) of
+            error ->
+                make_handler(CmdName, Mod, DefaultTerm);
+            {ok, optional} ->
+                make_handler(CmdName, Mod, DefaultTerm);
+            {ok, Existing} ->
+                Existing
+        end,
+    %%
+    Cmd = Cmd0#{handler => Handler},
+    case maps:find(commands, Cmd) of
+        error ->
+            Cmd;
+        {ok, Sub} ->
+            NewCmds = maps:map(fun (CN, CV) -> create_handlers(Mod, CN, CV, DefaultTerm) end, Sub),
+            Cmd#{commands => NewCmds}
+    end.
+
+%% @private makes handler in required format
+make_handler(CmdName, Mod, error) ->
+    {Mod, list_to_existing_atom(CmdName)};
+make_handler(CmdName, Mod, {ok, Default}) ->
+    {Mod, list_to_existing_atom(CmdName), Default}.
 
 %% @private
 %% Finds out whether it was --help/-h requested, and exception was thrown due to that
@@ -217,6 +279,7 @@ help_requested({unknown_argument, CmdPath, [Prefix, Prefix, $h, $e, $l, $p]}, Pr
 help_requested(_, _) ->
     false.
 
+%% @private returns CmdPath when Prefix is one of supplied Prefixes
 is_prefix(Prefix, Prefixes, CmdPath) ->
     case lists:member(Prefix, Prefixes) of
         true ->
@@ -224,3 +287,19 @@ is_prefix(Prefix, Prefixes, CmdPath) ->
         false ->
             false
     end.
+
+%% @private
+%% Given command map, path to reach a specific command, and a parsed argument
+%%  map, returns a list of arguments (effectively used to transform map-based
+%%  callback handler into positional).
+arg_map_to_arg_list(Command, Path, ArgMap, Default) ->
+    AllArgs = collect_arguments(Command, Path, []),
+    [maps:get(Arg, ArgMap, Default) || #{name := Arg} <- AllArgs].
+
+%% recursively descend into Path, ignoring arguments with duplicate names
+collect_arguments(Command, [], Acc) ->
+    Acc ++ maps:get(arguments, Command, []);
+collect_arguments(Command, [H|Tail], Acc) ->
+    Args = maps:get(arguments, Command, []),
+    Next = maps:get(H, maps:get(commands, Command, H)),
+    collect_arguments(Next, Tail, Acc ++ Args).
