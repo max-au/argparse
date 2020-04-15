@@ -567,7 +567,12 @@ consume([[Prefix | _] = ArgValue | Tail], Opt, Eos) when ?IS_OPTIONAL(Opt), is_m
     end;
 
 consume([ArgValue | Tail], Opt, Eos) ->
-    action(Tail, ArgValue, Opt, Eos).
+    action(Tail, ArgValue, Opt, Eos);
+
+%% we can only be here if it's optional argument, but there is no value supplied,
+%%  and type is not 'boolean' - this is an error!
+consume([], Opt, Eos) ->
+    fail({missing_argument, Eos#eos.commands, maps:get(name, Opt)}).
 
 %% no more arguments for consumption, but last optional may still be action-ed
 %%consume([], Current, Opt, Eos) ->
@@ -615,7 +620,7 @@ action(Tail, ArgValue, #{name := ArgName, action := extend} = Opt, #eos{argmap =
     Extended = maps:get(ArgName, ArgMap, []) ++ Value,
     continue_parser(Tail, Opt, Eos#eos{argmap = ArgMap#{ArgName => Extended}});
 
-action(Tail, undefined, #{name := ArgName, action := count} = Opt, #eos{argmap = ArgMap} = Eos) ->
+action(Tail, _, #{name := ArgName, action := count} = Opt, #eos{argmap = ArgMap} = Eos) ->
     continue_parser(Tail,  Opt, Eos#eos{argmap = ArgMap#{ArgName => maps:get(ArgName, ArgMap, 0) + 1}});
 
 %% default: same as set
@@ -667,6 +672,8 @@ convert_type(boolean, "true", _Opt, _Eos) ->
     true;
 convert_type(boolean, "false", _Opt, _Eos) ->
     false;
+convert_type(boolean, Arg, Opt, Eos) ->
+    fail({invalid_argument, Eos#eos.commands, Opt, Arg});
 convert_type(binary, Arg, _Opt, _Eos) ->
     list_to_binary(Arg);
 convert_type({binary, Choices}, Arg, Opt, Eos) when is_list(Choices), is_binary(hd(Choices)) ->
@@ -836,12 +843,12 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
             lists:foldl(
                 fun (#{short := Short, name := OName}, {AllS, AllL}) ->
                         is_map_key(Short, AllS) andalso
-                            fail({invalid_option, clean_path(Path), OName,
+                            fail({invalid_option, clean_path(Path), OName, short,
                                     "short conflicting with " ++ atom_to_list(maps:get(Short, AllS))}),
                         {AllS#{Short => OName}, AllL};
                     (#{long := Long, name := OName}, {AllS, AllL}) ->
                         is_map_key(Long, AllL) andalso
-                            fail({invalid_option, clean_path(Path), OName,
+                            fail({invalid_option, clean_path(Path), OName, long,
                                     "long conflicting with " ++ atom_to_list(maps:get(Long, AllL))}),
                         {AllS, AllL#{Long => OName}};
                     (_, AccIn) ->
@@ -898,8 +905,11 @@ validate_action({append, Term}, _Path, _Opt) ->
     {append, Term};
 validate_action(count, _Path, _Opt) ->
     count;
-validate_action(extend, _Path, _Opt) ->
+validate_action(extend, _Path, #{nargs := Nargs}) when
+    Nargs =:= list; Nargs =:= nonempty_list; Nargs =:= all; is_integer(Nargs) ->
     extend;
+validate_action(extend, Path, #{name := Name}) ->
+    fail({invalid_option, clean_path(Path), Name, action, "extend action works only with lists"});
 validate_action(_Action, Path, #{name := Name}) ->
     fail({invalid_option, clean_path(Path), Name, action, "unsupported"}).
 

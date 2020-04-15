@@ -25,7 +25,8 @@
     multi_short/0, multi_short/1,
     usage/0, usage/1,
     readme/0, readme/1,
-    error_usage/0, error_usage/1
+    error_usage/0, error_usage/1,
+    meta/0, meta/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -39,7 +40,7 @@ groups() ->
     [{parallel, [parallel], [
         basic, single_arg_built_in_types, complex_command, errors, args, argparse, negative,
         nodigits,  python_issue_15112, type_validators, subcommand, error_format,
-        very_short, multi_short, usage, readme, error_usage
+        very_short, multi_short, usage, readme, error_usage, meta
     ]}].
 
 all() ->
@@ -287,9 +288,9 @@ errors() ->
 errors(Config) when is_list(Config) ->
     Prog = [prog()],
     %% conflicting option names
-    ?assertException(error, {argparse, {invalid_option, _, two, "short conflicting with one"}},
+    ?assertException(error, {argparse, {invalid_option, _, two, short, "short conflicting with one"}},
         parse("", #{arguments => [#{name => one, short => $$}, #{name => two, short => $$}]})),
-    ?assertException(error, {argparse, {invalid_option, _, two, "long conflicting with one"}},
+    ?assertException(error, {argparse, {invalid_option, _, two, long, "long conflicting with one"}},
         parse("", #{arguments => [#{name => one, long => "a"}, #{name => two, long => "a"}]})),
     %% broken options
     ?assertException(error, {argparse, {invalid_option, _, one, long, _}},
@@ -618,4 +619,23 @@ error_usage(Config) when is_list(Config) ->
         Actual = argparse:format_error(Reason, ubiq_cmd(), #{}),
         ct:pal("error: ~s", [Actual])
     end,
+    ok.
+
+meta() ->
+    [{doc, "Tests found while performing meta-testing"}].
+
+%% This test does not verify usage printed,
+%%  but at least ensures formatter does not crash.
+meta(Config) when is_list(Config) ->
+    %% short option with no argument, when it's needed
+    ?assertException(error, {argparse, {missing_argument, _, short49}},
+        parse("-1", #{arguments => [#{name => short49, short => 49}]})),
+    %% extend + maybe
+    ?assertException(error, {argparse, {invalid_option, _, short49, action, _}},
+        parse("-1 -1", #{arguments =>
+        [#{action => extend, name => short49, nargs => maybe, short => 49}]})),
+    %%
+    ?assertEqual(#{short49 => 2},
+        parse("-1 arg1 --force", #{arguments =>
+        [#{action => count, long => "-force", name => short49, nargs => maybe, short => 49}]})),
     ok.
