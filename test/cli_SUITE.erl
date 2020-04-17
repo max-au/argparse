@@ -30,6 +30,7 @@
 %% Internal exports
 -export([
     cli/0,
+    cli/1,
     sum/1,
     cos/1,
     mul/2
@@ -106,6 +107,7 @@ cli_module(Mod, Calc) ->
 
 cli() ->
     #{
+        handler => optional,
         commands => #{
             "sum" => #{
                 arguments => [
@@ -133,6 +135,9 @@ cli() ->
 %%--------------------------------------------------------------------
 %% handlers
 
+cli(#{}) ->
+    success.
+
 sum(#{num := Nums}) ->
     lists:sum(Nums).
 
@@ -156,7 +161,9 @@ test_cli(Config) when is_list(Config) ->
     ?assertEqual(6, cli:run(["sum", "3", "3"], #{modules => [?MODULE]})),
     Expected = "error: erm sum: required argument missing: num\nusage: erm",
     {ok, Actual} = capture_output(fun () -> cli:run(["sum"], #{progname => "erm"}) end),
-    ?assertEqual(Expected, lists:sublist(Actual, length(Expected))).
+    ?assertEqual(Expected, lists:sublist(Actual, length(Expected))),
+    %% test "catch-all" handler
+    ?assertEqual(success, cli:run([])).
 
 auto_help() ->
     [{doc, "Tests automatic --help and -h switch"}].

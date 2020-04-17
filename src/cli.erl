@@ -143,12 +143,24 @@ run_impl(Args, ArgOpts, Modules, Options) ->
                         _:_ when Warn =:= suppress ->
                             #{}
                 end,
+            %% handlers: use first non-empty handler
+            Cmds1 =
+                if (not is_map_key(handler, Cmds)) andalso is_map_key(handler, ModCmd) ->
+                    Cmds#{handler => maps:get(handler, ModCmd)};
+                    true -> Cmds
+                end,
+            %% help: concatenate help lines
+            Cmds2 =
+                if is_map_key(help, ModCmd) ->
+                    Cmds1#{help => maps:get(handler, ModCmd) ++ maps:get(help, Cmds1, "")};
+                    true -> Cmds1
+                end,
             %% merge arguments, and warn if warnings are not suppressed, and there
             %%  is more than a single module
-            Cmds1 = merge_arguments(maps:get(arguments, ModCmd, []),
-                (ModCount > 1 andalso Warn =:= warn), Cmds),
+            Cmds3 = merge_arguments(maps:get(arguments, ModCmd, []),
+                (ModCount > 1 andalso Warn =:= warn), Cmds2),
             %% merge commands
-            merge_commands(maps:get(commands, ModCmd, #{}), Mod, Options, Cmds1)
+            merge_commands(maps:get(commands, ModCmd, #{}), Mod, Options, Cmds3)
         end, #{}, Modules),
     %% attempt to dispatch the command
     try argparse:parse(Args, CmdMap, ArgOpts) of
