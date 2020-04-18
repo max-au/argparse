@@ -988,8 +988,8 @@ format_help({CmdName, Root}, Format) ->
     %% descent into commands collecting all options on the way
     {Cmd, AllArgs} = collect_options(Root, Nested, []),
     %% split arguments into Flags, Options, Positional, and create help lines
-    {_, Longest, Flags, Opts, Args, OptLines} = lists:foldl(fun format_opt_help/2,
-        {Prefix, 0, "", [], [], []}, AllArgs),
+    {_, Longest, Flags, Opts, Args, OptL, PosL} = lists:foldl(fun format_opt_help/2,
+        {Prefix, 0, "", [], [], [], []}, AllArgs),
     %% collect and format sub-commands
     Immediate = maps:get(commands, Cmd, #{}),
     {Long, Subs} = maps:fold(
@@ -1012,16 +1012,16 @@ format_help({CmdName, Root}, Format) ->
         end,
     %% format flags
     FlagsForm = if Flags =:=[] -> ""; true -> io_lib:format(" [~c~s]", [Prefix, Flags]) end,
-    %% format non-flag optionals
-    OptsForm = Opts,
-    %% format positional arguments
-    ArgsForm = Args,
     %% format extended view
     OptFormat = io_lib:format("  ~~-~bs ~~s~n", [Longest]),
-    FormOpts = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- lists:reverse(OptLines)],
+    %% split OptLines into positional and optional arguments
+    FormattedOpts = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- lists:reverse(OptL)],
+    FormattedArgs = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- lists:reverse(PosL)],
     %% format first usage line
-    lists:flatten(io_lib:format("usage: ~s~s~s~s~s~n~s~s", [CmdName, ShortCmd, FlagsForm, OptsForm, ArgsForm,
-        maybe_add("~nSubcommands:~n~s", Commands), maybe_add("~nOptional arguments:~n~s", FormOpts)])).
+    lists:flatten(io_lib:format("usage: ~s~s~s~s~s~n~s~s~s", [CmdName, ShortCmd, FlagsForm, Opts, Args,
+        maybe_add("~nSubcommands:~n~s", Commands),
+        maybe_add("~nArguments:~n~s", FormattedArgs),
+        maybe_add("~nOptional arguments:~n~s", FormattedOpts)])).
 
 %% collects options on the Path, and returns found Command
 collect_options(Command, [], Args) ->
@@ -1041,7 +1041,7 @@ maybe_add(ToAdd, List) ->
 %%  long options, and positional arguments
 
 %% format optional argument
-format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) when ?IS_OPTIONAL(Opt) ->
+format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) when ?IS_OPTIONAL(Opt) ->
     Desc = lists:flatten(io_lib:format("~s~s~s",
         [get_help(Opt), format_type(Opt), format_default(Opt)])),
     %% does it need an argument? look for nargs and action
@@ -1077,19 +1077,19 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) when ?IS_OP
             {ok, Short} ->
                 {maybe_concat([Prefix, Short], Name0), [Short], MaybeOpt0}
         end,
-    %% name length, capped at 16
+    %% name length, capped at 24
     NameLen = length(Name),
     Capped = min(24, NameLen),
-    {Prefix, max(Capped, Longest), Flags ++ MaybeFlag, Opts ++ MaybeOpt, Args, [{Name, Desc} | OptLines]};
+    {Prefix, max(Capped, Longest), Flags ++ MaybeFlag, Opts ++ MaybeOpt, Args, [{Name, Desc} | OptL], PosL};
 
 %% format positional argument
-format_opt_help(#{name := Name} = Opt, {Prefix, Longest, Flags, Opts, Args, OptLines}) ->
+format_opt_help(#{name := Name} = Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) ->
     Desc = lists:flatten(io_lib:format("~s~s~s",
         [maps:get(help, Opt, ""), format_type(Opt), format_default(Opt)])),
     %% positional, hence required
     LName = io_lib:format("~s", [Name]),
     LPos = format_required(maps:get(required, Opt, true), "", Opt),
-    {Prefix, max(Longest, length(LName)), Flags, Opts, Args ++ LPos, [{LName, Desc}|OptLines]}.
+    {Prefix, max(Longest, length(LName)), Flags, Opts, Args ++ LPos, OptL, [{LName, Desc}|PosL]}.
 
 get_help(#{help := Help}) ->
     Help;
