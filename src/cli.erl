@@ -1,13 +1,28 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2020, Maxim Fedorov <maximfca@mail.com>
+%%% @author Maxim Fedorov, <maximfca@gmail.com>
 %%% @doc
 %%% Command line utility behaviour. Usage example:
 %%%
-%%%  From an escript main/1 function (requires -mode(compile)):
+%%%  From an escript main/1 function (requires `-mode(compile)'):
+%%%  ```
 %%%     cli:run(Args).
+%%%  '''
 %%%
-%%%  Or, to limit cli behaviur discovery,
+%%%  Or, to limit cli behaviour discovery,
+%%%  ```
 %%%     cli:run(Args, #{modules => ?MODULE}).
+%%%  '''
+%%% Other options available for run/2:
+%%% <ul><li>`modules':<ul>
+%%%     <li>`all_loaded' - search all loaded modules (`code:all_loaded()') for `cli' behaviour</li>
+%%%     <li>`module()'   - use this module (must export `cli/0')</li>
+%%%     <li>[module()]   - list of modules (must export `cli/0')</li></ul></li>
+%%% <li>`warn': set to `suppress' suppresses warnings logged</li>
+%%% <li>`help': set to false suppresses printing `usage' when parser produces
+%%%      an error, and disabled default --help/-h behaviour</li>
+%%% <li>`handler' controls which handler form is going to be used to generate
+%%%      default handler, and value to use for missing arguments</li>
+%%% </ul>
 %%%
 %%% Warnings are printed to OTP logger, unless suppressed.
 %%%
@@ -16,8 +31,9 @@
 %%%     commands, if it can find function exported with
 %%%     suitable signature.
 %%%
-%%% @end
+%%% cli examples are <a href="https://github.com/max-au/argparse/tree/master/doc/examples">available on GitHub</a>
 %%%
+%%% @end
 
 -module(cli).
 -author("maximfca@gmail.com").
@@ -30,7 +46,7 @@
 %%--------------------------------------------------------------------
 %% Behaviour definition
 
-%% @doc
+%% Callback returning CLI mappings.
 %% Must return a command, that may contain sub-commands.
 %% If there are no sub-commands, and there are no other
 %%  modules loaded that implement cli behaviour,
@@ -38,14 +54,13 @@
 %%  represents new entry point.
 -callback cli() -> argparse:command().
 
-%% @doc
+%% Default CLI callback.
 %% Small utility that does not need sub-command should
 %%  export this callback that will be called by run/1.
 -callback cli(argparse:arg_map()) -> term().
 
-%% @doc
-%% Needs to be exported by small command line scripts that
-%%  do not have any sub-commands.
+%% Complex utilities with many command exported
+%%  don't need cli/1.
 -optional_callbacks([cli/1]).
 
 %%--------------------------------------------------------------------
@@ -53,25 +68,21 @@
 
 -compile(warn_missing_spec).
 
-%% @doc
-%% Finds all modules loaded, and implementing cli behaviour,
-%%  then matches a command and runs handler defined for
-%%  a command.
--spec run([string()]) -> term().
+-spec run(Args :: [string()]) -> term().
+%% @equiv run(Args, #{})
 run(Args) ->
     run(Args, #{}).
 
-%% @doc
 %% Options map.
 %% Allows to choose which modules to consider, and error handling mode.
-%% 'modules' can be:
-%%     'all_loaded' - code:all_loaded(), search for 'cli' behaviour,
-%%     module()       for a single module (may not have 'cli' behaviour),
-%%     [module()]     for a list of modules (may not have 'cli' behaviour)
-%% 'warn' set to 'suppress' suppresses warnings logged
-%% 'help' set to false suppresses printing 'usage' when parser produces
+%% `modules' can be:
+%%     `all_loaded' - code:all_loaded(), search for `cli' behaviour,
+%%     module()       for a single module (may not have `cli' behaviour),
+%%     [module()]     for a list of modules (may not have `cli' behaviour)
+%% `warn' set to `suppress' suppresses warnings logged
+%% `help' set to false suppresses printing `usage' when parser produces
 %%      an error, and disabled default --help/-h behaviour
-%% 'handler' controls which handler form is going to be used to generate
+%% `handler' controls which handler form is going to be used to generate
 %%      default handler, and value to use for missing arguments
 -type run_options() :: #{
     modules => all_loaded | module() | [module()],
@@ -82,10 +93,12 @@ run(Args) ->
     progname => string()    %% specifies executable name instead of 'erl'
 }.
 
-%% @doc
-%% Fine-grained control version of run/1, supporting options.
-%% Returns either a term, or term with list of exceptions turned into
-%%  tuples of {Class, Reason, [Stack]}
+%% @doc CLI entry point, parses arguments and executes selected function.
+%% Finds all modules loaded, and implementing cli behaviour,
+%%  then matches a command and runs handler defined for
+%%  a command.
+%% @param Args arguments used to run CLI, e.g. init:get_plain_arguments().
+%% @returns callback result, ok 'ok' when help/error message printed.
 -spec run([string()], run_options()) -> term().
 run(Args, Options) ->
     ParserOptions = copy_options([prefixes, progname], Options, #{}),
@@ -95,7 +108,7 @@ run(Args, Options) ->
 %%--------------------------------------------------------------------
 %% Internal implementation
 
-%% @doc conditionally copy items from one map to another
+%% Conditionally copy items from one map to another
 %% next 5 lines of code make Dialyzer happy. Otherwise
 %%  it rightfully says "your parser options also contain
 %%  run options"
@@ -108,7 +121,6 @@ copy_options([_Head|Tail], Options, Acc) ->
 
 -include_lib("kernel/include/logger.hrl").
 
-%% @private
 %% Returns a list of all modules providing 'cli' behaviour, or
 %%  a list of modules.
 modules(all_loaded) ->
@@ -126,7 +138,6 @@ behaviours(Module) ->
     lists:flatten(proplists:get_all_values(behavior, Attrs) ++
         proplists:get_all_values(behaviour, Attrs)).
 
-%% @private
 %% Dispatches Args over Modules, with specified ErrMode
 run_impl(Args, ArgOpts, Modules, Options) ->
     Warn = maps:get(warn, Options, warn),
@@ -203,7 +214,6 @@ run_impl(Args, ArgOpts, Modules, Options) ->
             end
     end.
 
-%% @private
 %% finds first module that exports ctl/1 and execute it
 exec_cli([], CmdMap, _ArgMap, ArgOpts) ->
     %% command not found, let's print usage
@@ -216,7 +226,6 @@ exec_cli([Mod|Tail], CmdMap, Args, ArgOpts) ->
             exec_cli(Tail, CmdMap, Args, ArgOpts)
     end.
 
-%% @private
 %% argparse does not allow clashing options, so if cli is ever to support
 %%  that, logic to un-clash should be here
 merge_arguments([], _Warn, Existing) ->
@@ -227,7 +236,6 @@ merge_arguments(Args, Warn, Existing) ->
     ExistingArgs = maps:get(arguments, Existing, []),
     Existing#{arguments => ExistingArgs ++ Args}.
 
-%% @private
 %% argparse accepts a map of commands, which means, commands names
 %%  can never clash. Yet for cli it is possible when multiple modules
 %%  export command with the same name. For this case, skip duplicate
@@ -254,7 +262,6 @@ merge_commands(Cmds, Mod, Options, Existing) ->
     ),
     Existing#{commands => MergedCmds}.
 
-%% @private
 %% Descends into sub-commands creating handlers where applicable
 create_handlers(Mod, CmdName, Cmd0, DefaultTerm) ->
     Handler =
@@ -276,13 +283,12 @@ create_handlers(Mod, CmdName, Cmd0, DefaultTerm) ->
             Cmd#{commands => NewCmds}
     end.
 
-%% @private makes handler in required format
+%% makes handler in required format
 make_handler(CmdName, Mod, error) ->
     {Mod, list_to_existing_atom(CmdName)};
 make_handler(CmdName, Mod, {ok, Default}) ->
     {Mod, list_to_existing_atom(CmdName), Default}.
 
-%% @private
 %% Finds out whether it was --help/-h requested, and exception was thrown due to that
 help_requested({unknown_argument, CmdPath, [Prefix, $h]}, Prefixes) ->
     is_prefix(Prefix, Prefixes, CmdPath);
@@ -291,7 +297,7 @@ help_requested({unknown_argument, CmdPath, [Prefix, Prefix, $h, $e, $l, $p]}, Pr
 help_requested(_, _) ->
     false.
 
-%% @private returns CmdPath when Prefix is one of supplied Prefixes
+%% returns CmdPath when Prefix is one of supplied Prefixes
 is_prefix(Prefix, Prefixes, CmdPath) ->
     case lists:member(Prefix, Prefixes) of
         true ->
@@ -300,7 +306,6 @@ is_prefix(Prefix, Prefixes, CmdPath) ->
             false
     end.
 
-%% @private
 %% Given command map, path to reach a specific command, and a parsed argument
 %%  map, returns a list of arguments (effectively used to transform map-based
 %%  callback handler into positional).

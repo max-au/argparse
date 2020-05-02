@@ -142,6 +142,32 @@ rebar3.
 
     {deps, [argparse]}.
 
+## Known incompatibilities:
+  * boolean flag (option), automatically using {store, true}
+  * all positional arguments are required by default (even 'maybe')
+  * first-class (sub) commands, slightly differently from argparse
+  * implicit --help/-h is not a part of argparse (but implemented in cli)
+
+Commands vs. positional arguments: command always takes precedence
+over positional argument.
+Commands form exclusive groups, e.g. only one command can
+be followed at a time.
+
+Kinds of arguments supported:
+ * command (priority positional argument) : ectl {crawler|reader|writer}
+ * command, and sub-command:                ectl crawler {start|stop|check}
+ * positional argument (required):          ectl <arg1> <arg2>
+ * positional argument (with default):      ectl [<arg1>]
+ * boolean flag:              ectl [-rf]
+ * required flag:             ectl -r
+ * short optional argument:   ectl [-i <int>]
+ * short optional:            ectl [-i [<int>]]
+ * required short option:     ectl -i <int>
+ * long option flag:          ectl [--foo]
+ * long optional argument:    ectl [--foo <arg>]
+ * required long:             ectl --foo <arg>
+ * list of arguments:         ectl <arg>, ...
+
 ## Expected features
 
 To be considered after 1.0.0:
@@ -156,7 +182,7 @@ To be considered after 1.0.0:
 
 ## Changelog
 
-Version 1.0.0:
+Version 1.0.1:
  * First public release
 
 Version 0.1.0:

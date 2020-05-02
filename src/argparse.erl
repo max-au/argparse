@@ -1,42 +1,39 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2020, Maxim Fedorov <maximfca@mail.com>
+%%% @author Maxim Fedorov, <maximfca@gmail.com>
 %%% @doc
 %%% Command line parser, made with hierarchy of commands in mind.
+%%% Parser operates with <em>arguments</em> and <em>commands</em>, organised in a hierarchy. It is possible
+%%% to define multiple commands, or none. Parsing always starts with root <em>command</em>,
+%%% named after `init:get_argument(progname)'. Empty command produces empty argument map:
+%%% ```
+%%% 1> parse("", #{}).
+%%%    #{}
+%%% '''
 %%%
-%%% Inspired by Python argparse library.
-%%% Known incompatibilities:
-%%%  * boolean flag (option), automatically using {store, true}
-%%%  * all positional arguments are required by default (even 'maybe')
-%%%  * first-class (sub) commands, slightly differently from argparse
-%%%  * implicit --help/-h is not a part of argparse (but implemented in cli)
 %%%
-%%% Commands vs. positional arguments: command always takes precedence
-%%%  over positional argument.
-%%% Commands form exclusive groups, e.g. only one command can
-%%%  be followed at a time.
+%%% If root level command does not contain any sub-commands, parser returns plain map of
+%%% argument names to their values:
+%%% ```
+%%% 3> argparse:parse(["value"], #{arguments => [#{name => arg}]}).
+%%% #{arg => "value"}
+%%% '''
+%%% This map contains all arguments matching command line passed, initialised with
+%%% corresponding values. If argument is omitted, but default value is specified for it,
+%%% it is added to the map. When no default value specified, and argument is not
+%%% present, corresponding key is not present in the map.
 %%%
-%%% Kinds of arguments supported:
-%%%  * command (priority positional argument) : ectl {crawler|reader|writer}
-%%%  * command, and sub-command:                ectl crawler {start|stop|check}
+%%% Missing required (field <strong>required</strong> is set to true for optional arguments,
+%%% or missing for positional) arguments raises an error.
 %%%
-%%%  * positional argument (required):          ectl <arg1> <arg2>
-%%%  * positional argument (with default):      ectl [<arg1>]
-%%%
-%%%  * boolean flag:              ectl [-rf]
-%%%  * required flag:             ectl -r
-%%%  * short optional argument:   ectl [-i <int>]
-%%%  * short optional:            ectl [-i [<int>]]
-%%%  * required short option:     ectl -i <int>
-%%%  * long option flag:          ectl [--foo]
-%%%  * long optional argument:    ectl [--foo <arg>]
-%%%  * required long:             ectl --foo <arg>
-%%%  * list of arguments:         ectl <arg>, ...
-%%%
-%%% Help conventions follow Unix Utility Argument Syntax:
-%%%  utility_name [-abcDxyz][-p arg][operand]
-%%%
+%%% When there are sub-commands, parser returns argument map, deepest matched command
+%%% name, and a sub-spec passed for this command:
+%%% ```
+%%% 4> Cmd =  #{arguments => [#{name => arg}]}.
+%%% #{arguments => [#{name => arg}]}
+%%% 5> argparse:parse(["cmd", "value"], #{commands => #{"cmd" => Cmd}}).
+%%% {#{arg => "value"},{"cmd",#{arguments => [#{name => arg}]}}}
+%%% '''
 %%% @end
-%%%
 
 -module(argparse).
 -author("maximfca@gmail.com").
@@ -62,6 +59,7 @@
 %% String and binary validation may use regex match (ignoring captured value).
 %% For float, int, string, binary and atom type, it is possible to specify
 %%  available choices instead of regex/min/max.
+%% @end
 -type arg_type() ::
     boolean |
     float |
@@ -131,9 +129,7 @@
     help => string()
 }.
 
-%% Arguments map: argument name to a term, produced by parser.
-%% Supplied to command handler
--type arg_map() :: #{term() => term()}.
+-type arg_map() :: #{term() => term()}. %% Arguments map: argument name to a term, produced by parser. Supplied to command handler
 
 %% Command handler. May produce some output. Can accept a map, or be
 %%  arbitrary mfa() for handlers accepting positional list.
@@ -148,8 +144,7 @@
     {fun((arg_map()) -> term()), term()} |  %% handler, positional form
     {module(), atom(), term()}.         %% handler, positional form, exported from module()
 
-%% Sub-commands are arranged into maps (cannot start with prefix)
--type command_map() :: #{string() => command()}.
+-type command_map() :: #{string() => command()}. %% Sub-commands are arranged into maps (cannot start with <em>prefix</em>)
 
 %% Command descriptor
 -type command() :: #{
@@ -178,8 +173,7 @@
 %% Optional or positional argument?
 -define(IS_OPTIONAL(Arg), is_map_key(short, Arg) orelse is_map_key(long, Arg)).
 
-%% Command path, for deeply nested sub-commands
--type cmd_path() :: [string()].
+-type cmd_path() :: [string()]. %% Command path, for deeply nested sub-commands
 
 %% Parser state (not available via API)
 -record(eos, {
@@ -217,33 +211,31 @@
     command => [string()]   %% nested command (missing/empty for top-level command)
 }.
 
-%% Command name with command spec
--type command_spec() :: {Name :: string(), command()}.
+-type command_spec() :: {Name :: string(), command()}. %% Command name with command spec
 
-%% Result returned from parse/2,3: can be only argument map,
-%%  or argument map with command_spec.
--type parse_result() :: arg_map() | {arg_map(), command_spec()}.
+-type parse_result() :: arg_map() | {arg_map(), command_spec()}. %% Result returned from parse/2,3: can be only argument map,  or argument map with command_spec.
 
-%% @doc
-%% Validates command specification, throws if there is an error.
-%% Returns program name (from init:get_argument(progname)) with
-%%  canonical command.
+%% @equiv validate(Command, #{})
 -spec validate(command()) -> command_spec().
 validate(Command) ->
     validate(Command, #{}).
 
+%% @doc Validate command specification, taking Options into account.
+%% Generates error signal when command specification is invalid.
 -spec validate(command(), parser_options()) -> command_spec().
 validate(Command, Options) ->
     validate_impl(Command, Options).
 
-%% @doc
-%% Parses supplied arguments according to expected command definition.
+
+%% @equiv parse(Args, Command, #{})
 -spec parse(Args :: [string()], command() | command_spec()) -> parse_result().
 parse(Args, Command) ->
     parse(Args, Command, #{}).
 
-%% @doc
-%% Parses supplied arguments, with additional options specified.
+%% @doc Parses supplied arguments according to expected command definition.
+%% @param Args command line arguments (e.g. `init:get_plain_arguments()')
+%% @returns argument map, or argument map with deepest matched command
+%%  definition.
 -spec parse(Args :: [string()], command() | command_spec(),
     Options :: parser_options()) -> parse_result().
 parse(Args, Command, Options) ->
@@ -255,8 +247,7 @@ parse(Args, Command, Options) ->
 %%  sub-command.
 -define (DEFAULT_INDENT, "  ").
 
-%% @doc
-%% Returns help for Command
+%% @equiv help(Command, #{})
 -spec help(command() | command_spec()) -> string().
 help(Command) ->
     format_help(validate(Command), #{}).
@@ -267,12 +258,12 @@ help(Command) ->
 help(Command, Options) ->
     format_help(validate(Command, Options), Options).
 
-%% @doc
-%% Format exception reasons produced by parse/2.
+%% @doc Format exception reasons produced by parse/2.
 %% Exception of class error with reason {argparse, Reason} is normally
 %%  raised, and format_error accepts only the Reason part, leaving
 %%  other exceptions that do not belong to argparse out.
--spec format_error(argparse_reason()) -> string().
+%% @returns string, ready to be printed via io:format().
+-spec format_error(Reason :: argparse_reason()) -> string().
 format_error({invalid_command, Path, Field, Text}) ->
     lists:flatten(io_lib:format("~sinternal error, invalid field '~s': ~s~n",
         [format_path(Path), Field, Text]));
@@ -289,9 +280,9 @@ format_error({invalid_argument, Path, Name, Value}) ->
     lists:flatten(io_lib:format("~sinvalid argument ~s for: ~s~n",
         [format_path(Path), Value, Name])).
 
-%% @doc
-%% Formats exception, and adds command usage information for
+%% @doc Formats exception, and adds command usage information for
 %%  command that was known/parsed when exception was raised.
+%% @returns string, ready to be printed via io:format().
 -spec format_error(argparse_reason(), command() | command_spec(), parser_options()) -> string().
 format_error(Reason, Command, Options) ->
     Path = tl(lists:reverse(element(2, Reason))),
@@ -302,7 +293,6 @@ format_error(Reason, Command, Options) ->
 %%--------------------------------------------------------------------
 %% Parser implementation
 
-%% @private
 %% parse_impl implements entire internal parse logic.
 
 %% Claus: option starting with any prefix
@@ -382,7 +372,6 @@ parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, po
             {ArgMap3, {tl(lists:reverse(Eos#eos.commands)), Eos#eos.current}}
     end.
 
-%% @private
 %% Generate error for missing required argument, and supply defaults for
 %%  missing optional arguments that have defaults.
 fold_args_map(Commands, Req, ArgMap, Args) ->
@@ -416,14 +405,12 @@ parse_positional(Arg, Tail, #eos{pos = Pos} = Eos) ->
     %% positional argument itself is a value
     consume([Arg | Tail], hd(Pos), Eos).
 
-%% @private
 %% Adds CmdName to path, and includes any arguments found there
 merge_arguments(CmdName, #{arguments := Args} = SubCmd, Eos) ->
     add_args(Args, Eos#eos{current = SubCmd, commands = [CmdName | Eos#eos.commands]});
 merge_arguments(CmdName, SubCmd, Eos) ->
     Eos#eos{current = SubCmd, commands = [CmdName | Eos#eos.commands]}.
 
-%% @private
 %% adds arguments into current set of discovered pos/opts
 add_args([], Eos) ->
     Eos;
@@ -442,7 +429,6 @@ add_args([#{long := L} = Option | Tail], #eos{long = Long} = Eos) ->
 add_args([PosOpt | Tail], #eos{pos = Pos} = Eos) ->
     add_args(Tail, Eos#eos{pos = Pos ++ [PosOpt]}).
 
-%% @private
 %% If no_digits is still true, try to find out whether it should turn false,
 %%  because added options look like negative numbers, and prefixes include -
 no_digits(false, _, _, _) ->
@@ -457,7 +443,6 @@ no_digits(true, _, _, Long) ->
 %%--------------------------------------------------------------------
 %% additional functions for optional arguments processing
 
-%% @private
 %% Returns true when option (!) description passed requires a positional argument,
 %%  hence cannot be treated as a flag.
 requires_argument(#{nargs := {maybe, _Term}}) ->
@@ -476,7 +461,6 @@ requires_argument(Opt) ->
             false
     end.
 
-%% @private
 %% Attempts to find if passed list of flags can be expanded
 abbreviated([Last], Acc, AllShort) when is_map_key(Last, AllShort) ->
     lists:reverse([Last | Acc]);
@@ -709,7 +693,6 @@ convert_type({custom, Fun}, Arg, Opt, Eos) ->
         fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end.
 
-%% @private
 %% Given Var, and list of {min, X}, {max, Y}, ensure that
 %%  value falls within defined limits.
 minimax(Var, [], _Eos, _Opt) ->
@@ -725,7 +708,6 @@ minimax(Var, [Num | Tail], Eos, Opt) when is_number(Num) ->
 minimax(Var, [_ | Tail], Eos, Opt) ->
     minimax(Var, Tail, Eos, Opt).
 
-%% @private
 %% returns int from string, or errors out with debugging info
 get_int(Arg, Opt, Eos) ->
     case string:to_integer(Arg) of
@@ -735,7 +717,6 @@ get_int(Arg, Opt, Eos) ->
             fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end.
 
-%% @private
 %% returns float from string, that is floating-point, or integer
 get_float(Arg, Opt, Eos) ->
     case string:to_float(Arg) of

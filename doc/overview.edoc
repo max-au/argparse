@@ -1,0 +1,159 @@
+ ** this is the overview.doc file for the application 'argparse' **
+
+   @version 1.0.0
+   @author Maxim Fedorov, <maximfca@gmail.com>
+   @title argparse: A simple framework to create complex CLI.
+
+   @doc
+   Inspired by Python argparse.
+
+   Follows conventions of  Unix Utility Argument Syntax.
+
+       `argparse [-abcDxyz][-p arg][operand]'
+
+   == Argument parser ==
+   Converts list of strings (command line) into an argument map,and a
+   command path; see <a href="https://github.com/max-au/argparse/blob/master/doc/ARGPARSE.md">argparse reference</a> for detailed description.
+
+   == CLI Framework ==
+   Make a step beyond parser, and export existing Erlang functions: <a href="https://github.com/max-au/argparse/blob/master/doc/CLI.md">cli reference</a>
+
+
+   == Basic example ==
+
+   CLI framework is naturally suitable for building small escript-based apps:
+
+       ```
+       #!/usr/bin/env escript
+
+       -export([main/1, cli/0, cli/1]).
+       -behaviour(cli).
+       -mode(compile). %% evaluated module cannot contain callbacks
+
+       main(Args) ->
+           cli:run(Args, #{progname => "simple").
+
+       cli() ->
+           #{arguments => [
+               #{name => force, short => $f, type => boolean, default => false},
+               #{name => recursive, short => $r, type => boolean, default => false},
+               #{name => dir}
+           ]}.
+
+       cli(#{force := Force, recursive := Recursive, dir := Dir}) ->
+           io:format("Removing ~s (force ~s, recursive: ~s)~n",
+               [Dir, Force, Recursive]).
+       '''
+
+   The example above does not have sub-commands, and implements optional cli/1
+   callback, that serves as an entry point with parsed arguments. Help options are
+   added automatically:
+
+       ```
+       $ ./erm --help
+       usage: erm [-fr] <dir>
+
+       Optional arguments:
+         dir
+         -r  recursive, [false]
+         -f  force, [false]
+       '''
+
+
+   == Calc: CLI with multiple commands ==
+
+   Calculator implements several commands, with sub-commands available. Full
+   <a href="https://github.com/max-au/argparse/blob/master/doc/examples/escript/calc">source code here</a>
+
+   Command definitions:
+
+       ```
+       cli() ->
+           #{
+               commands => #{
+                   "sum" => #{
+                       arguments => [
+                           #{name => num, nargs => nonempty_list, type => int, help => "Numbers to sum"}
+                       ]
+                   },
+                   "math" => #{
+                       commands => #{
+                           "sin" => #{handler => {math, sin, undefined}},
+                           "cos" => #{},
+                           "tan" => #{handler => {math, tan, undefined}}
+                       },
+                       arguments => [
+                           #{name => in, type => float, help => "Input value"}
+                       ]
+                   },
+                   "mul" => #{
+                       arguments => [
+                           #{name => left, type => int},
+                           #{name => right, type => int}
+                       ]
+                   }
+               }
+           }.
+       '''
+
+   Calculator provides "sum" command that prints a sum of integer numbers:
+
+       ```
+       $ ./calc sum 1 2 3
+       6
+       '''
+
+   Math sub-commands provide trigonometric functions:
+
+       ```
+       $ ./calc math cos 1.4
+       0.16996714290024104
+       $ ./calc math sin 1.4
+       0.9854497299884601
+       '''
+
+   ==  Complex applications ==
+
+   CLI framework is capable of handling releases containing hundreds of modules
+   implementing cli behaviour. Commands may be exported from multiple modules and
+   applications. cli framework makes best efforts to merge commands exported,
+   format usage output and error messages.
+
+   See <a href="https://github.com/max-au/argparse/tree/master/doc/examples/multi">example</a>
+
+   This example contains two modules, multi_math.erl and multi_string.erl.
+
+   Use `rebar3 escriptize' to build the application. Try various commands,
+   e.g.
+   ```
+   ./multi math cos 1.0
+   '''
+   ```
+   ./multi string lexemes 1+2+3+4 -s +
+   '''
+   to get a feeling!
+
+   ==  Argument parser ==
+
+   It is possible to use argument parser alone, without CLI framework:
+
+       ```
+       #!/usr/bin/env escript
+
+       main(Args) ->
+           #{force := Force, recursive := Recursive, dir := Dir} =
+               argparse:parse(Args, cli()),
+           io:format("Removing ~s (force: ~s, recursive: ~s)~n",
+               [Dir, Force, Recursive]).
+
+       cli() ->
+           #{arguments => [
+               #{name => force, short => $f, type => boolean, default => false},
+               #{name => recursive, short => $r, type => boolean, default => false},
+               #{name => dir}
+           ]}.
+       '''
+
+   == Help and usage information ==
+   CLI framework automatically prints usage, if command line parser reports an
+   error. An attempt is made to guess most relevant command.
