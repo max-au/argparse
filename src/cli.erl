@@ -146,7 +146,7 @@ run_impl(Args, ArgOpts, Modules, Options) ->
     CmdMap = lists:foldl(
         fun (Mod, Cmds) ->
             ModCmd =
-                try Mod:cli()
+                try {_, MCmd} = argparse:validate(Mod:cli(), ArgOpts), MCmd
                 catch
                     Class:Reason:Stack when Warn =:= warn ->
                         ?LOG_WARNING("Error calling ~s:cli(): ~s:~p~n~p",

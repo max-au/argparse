@@ -3,3 +3,11 @@ _build
 *.iml
 rebar3.crashdump
 *~
+/doc/argparse.html
+/doc/cli.html
+/doc/edoc-info
+/doc/erlang.png
+/doc/index.html
+/doc/modules-frame.html
+/doc/overview-summary.html
+/doc/stylesheet.css

@@ -24,7 +24,8 @@
     bare_cli/0, bare_cli/1,
     multi_module/0, multi_module/1,
     warnings/0, warnings/1,
-    simple/0, simple/1
+    simple/0, simple/1,
+    malformed_behaviour/0, malformed_behaviour/1
 ]).
 
 %% Internal exports
@@ -36,16 +37,36 @@
     mul/2
 ]).
 
+-export([log/2]).
+
 -behaviour(cli).
 
 suite() ->
     [{timetrap, {seconds, 5}}].
 
 all() ->
-    [test_cli, auto_help, bare_cli, multi_module, warnings].
+    [test_cli, auto_help, bare_cli, multi_module, warnings, malformed_behaviour].
 
 %%--------------------------------------------------------------------
 %% Helpers
+
+%% OTP logger redirection
+
+log(LogEvent, #{forward := Pid}) ->
+    Pid ! {log, LogEvent}.
+
+capture_log(Fun) ->
+    Tracer = spawn_link(fun () -> tracer([]) end),
+    logger:add_handler(?MODULE, ?MODULE, #{forward => Tracer}),
+    Ret =
+        try Fun()
+        after
+            logger:remove_handler(?MODULE)
+        end,
+    Captured = lists:flatten(lists:reverse(gen_server:call(Tracer, get))),
+    {Ret, Captured}.
+
+%% I/O redirection
 
 %% {io_request, From, ReplyAs, Request}
 %% {io_reply, ReplyAs, Reply}
@@ -59,6 +80,8 @@ tracer(Trace) ->
             Text = erlang:apply(Module, Function, Args),
             From ! {io_reply, ReplyAs, ok},
             tracer([Text | Trace]);
+        {log, LogEvent} ->
+            tracer([LogEvent | Trace]);
         {'$gen_call', From, get} ->
             gen:reply(From, Trace);
         Other ->
@@ -76,6 +99,10 @@ capture_output(Fun) ->
         end,
     Captured = lists:flatten(lists:reverse(gen_server:call(Tracer, get))),
     {Ret, Captured}.
+
+capture_output_and_log(Fun) ->
+    {{Ret, IO}, Log} = capture_log(fun () -> capture_output(Fun) end),
+    {Ret, IO, Log}.
 
 cli_module(Mod, CliRet, FunExport, FunDefs) ->
     Code = [
@@ -202,11 +229,16 @@ warnings() ->
     [{doc, "Ensure warnings are skipped, or emitted"}].
 
 warnings(Config) when is_list(Config) ->
-    %% TODO: implement logger handler that intercepts ?LOG_WARNING calls
     {ok, IO} = capture_output(fun () -> cli:run(["sum"], #{modules => nomodule}) end),
     ?assertNotEqual(nomatch, string:find(IO, "unrecognised argument: sum")),
-    %% ensure no log line added
-    {ok, IO} = capture_output(fun () -> cli:run(["sum"], #{modules => nomodule, warn => suppress}) end).
+    %% ensure log line added
+    {ok, IO, Log} = capture_output_and_log(fun () -> cli:run(["sum"], #{modules => nomodule}) end),
+    [#{level := Lvl, msg := {Fmt, _}}] = Log,
+    ?assertEqual(warning, Lvl),
+    ?assertEqual("Error calling ~s:cli(): ~s:~p~n~p", Fmt),
+    %% ensure no log line added when suppression is requested
+    {ok, IO, LogZero} = capture_output_and_log(fun () -> cli:run(["sum"], #{modules => nomodule, warn => suppress}) end),
+    ?assertEqual([], LogZero).
 
 simple() ->
     [{doc, "Runs simple example from examples"}].
@@ -221,3 +253,16 @@ simple(Config) when is_list(Config) ->
     {ok, IO} = capture_output(fun () -> cli:run(["4"], #{modules => simple, default => undefined}) end),
     ct:pal("~s", [IO]),
     ?assertEqual("Removing 4 (force: false, recursive: false)\n", IO).
+
+malformed_behaviour() ->
+    [{doc, "Tests for cli/0 callback returning invalid command map"}].
+
+malformed_behaviour(Config) when is_list(Config) ->
+    CliRet = "#{commands => #{deploy => #{}}}",
+    FunExport = "cli/1", FunDefs = "cli(#{arg := Args}) -> lists:sum(Args).",
+    cli_module(malformed, CliRet, FunExport, [FunDefs]),
+    {ok, IO, Log} = capture_output_and_log(fun () -> cli:run(["4"], #{modules => malformed}) end),
+    ?assertEqual("error: erl: unrecognised argument: 4\nusage: erl\n", IO),
+    [#{level := Lvl, msg := {Fmt, _Args}}] = Log,
+    ?assertEqual("Error calling ~s:cli(): ~s:~p~n~p", Fmt),
+    ?assertEqual(warning, Lvl).
