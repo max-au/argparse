@@ -21,6 +21,7 @@
 -export([
     test_cli/0, test_cli/1,
     auto_help/0, auto_help/1,
+    subcmd_help/0, subcmd_help/1,
     bare_cli/0, bare_cli/1,
     multi_module/0, multi_module/1,
     warnings/0, warnings/1,
@@ -45,7 +46,7 @@ suite() ->
     [{timetrap, {seconds, 5}}].
 
 all() ->
-    [test_cli, auto_help, bare_cli, multi_module, warnings, malformed_behaviour].
+    [test_cli, auto_help, subcmd_help, bare_cli, multi_module, warnings, malformed_behaviour].
 
 %%--------------------------------------------------------------------
 %% Helpers
@@ -106,15 +107,15 @@ capture_output_and_log(Fun) ->
 
 cli_module(Mod, CliRet, FunExport, FunDefs) ->
     Code = [
-        io_lib:format("-module(~s).", [Mod]),
-        "-export([cli/0]).",
-        lists:flatten(io_lib:format("-export([~s]).", [FunExport])),
-        "-behaviour(cli).",
-        lists:flatten(io_lib:format("cli() -> ~s.", [CliRet])) |
+        io_lib:format("-module(~s).\n", [Mod]),
+        "-export([cli/0]).\n",
+        if is_list(FunExport) -> lists:flatten(io_lib:format("-export([~s]).\n", [FunExport])); true -> undefined end,
+        "-behaviour(cli).\n",
+        lists:flatten(io_lib:format("cli() -> ~s.\n", [CliRet])) |
         FunDefs
     ],
-    ct:pal("~s~n", [Code]),
-    Tokens = [begin {ok, Tokens, _} = erl_scan:string(C), Tokens end || C <- Code],
+    ct:pal("~s~n", [lists:concat(Code)]),
+    Tokens = [begin {ok, Tokens, _} = erl_scan:string(C), Tokens end || C <- Code, C =/= undefined],
     %ct:pal("~p", [Tokens]),
     Forms = [begin {ok, F} = erl_parse:parse_form(T), F end || T <- Tokens],
     %ct:pal("~p", [Forms]),
@@ -198,6 +199,23 @@ auto_help() ->
 auto_help(Config) when is_list(Config) ->
     Expected = "usage: erm  {math|mul|sum}\n\nSubcommands:\n  math \n  mul  \n  sum  \n",
     ?assertEqual({ok, Expected}, capture_output(fun () -> cli:run(["--help"], #{progname => "erm"}) end)).
+
+subcmd_help() ->
+    [{doc, "Tests that help for an empty command list does not fail"}].
+
+subcmd_help(Config) when is_list(Config) ->
+    CliRet = "#{commands => #{\"foo\" => #{help => \"myfoo\", arguments => [#{name => left, help => \"lefty\"}]}}}",
+    cli_module(empty, CliRet, undefined, []),
+    %% capture good help output
+    {_Ret, IO} = capture_output(fun () -> cli:run(["foo", "--help"], #{modules => empty}) end),
+    ?assertEqual("usage: erl foo <left>\n\nArguments:\n  left lefty\n", IO),
+    %% capture global help output
+    {_Ret1, IO1} = capture_output(fun () -> cli:run(["--help"], #{modules => empty}) end),
+    ?assertEqual("usage: erl  {foo}\n\nSubcommands:\n  foo myfoo\n", IO1),
+    %% capture broken help output
+    {_Ret2, IO2} = capture_output(fun () -> cli:run(["mycool", "--help"], #{modules => empty}) end),
+    ?assertEqual("error: erl: unrecognised argument: mycool\nusage: erl  {foo}\n\nSubcommands:\n  foo myfoo\n", IO2),
+    ct:pal("~s", [IO]).
 
 bare_cli() ->
     [{doc, "Bare cli, no sub-commands"}].
