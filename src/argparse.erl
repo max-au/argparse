@@ -207,7 +207,7 @@
     %% allowed prefixes (default is [$-]).
     prefixes => [integer()],
     %% next fields are only considered when printing usage
-    progname => string(),   %% program name override
+    progname => string() | atom(),   %% program name override
     command => [string()]   %% nested command (missing/empty for top-level command)
 }.
 
@@ -782,9 +782,14 @@ fail(Reason) ->
 %%  trying to understand why things don't work, that is makes sense
 %%  to provide a mini-Dialyzer here.
 
-validate_impl(Command, #{progname := Prog} = Options) ->
+validate_impl(Command, #{progname := Prog} = Options) when is_list(Prog) ->
     Prefixes = maps:from_list([{P, true} || P <- maps:get(prefixes, Options, [$-])]),
     validate_command([{Prog, Command}], Prefixes);
+validate_impl(Command, #{progname := Prog} = Options) when is_atom(Prog) ->
+    Prefixes = maps:from_list([{P, true} || P <- maps:get(prefixes, Options, [$-])]),
+    validate_command([{atom_to_list(Prog), Command}], Prefixes);
+validate_impl(_Command, #{progname := _Prog} = _Options) ->
+    fail({invalid_command, [], progname, "progname must be a list or an atom"});
 validate_impl(Command, Options) ->
     {ok, [[Prog]]} = init:get_argument(progname),
     validate_impl(Command, Options#{progname => Prog}).
@@ -967,9 +972,6 @@ format_help({RootCmd, Root}, Format) ->
     Nested = maps:get(command, Format, []),
     %% descent into commands collecting all options on the way
     {CmdName, Cmd, AllArgs} = collect_options(RootCmd, Root, Nested, []),
-
-    ct:pal("CmdName: ~p ::: C: ~p AA: ~p, Fmt: ~p", [CmdName, Cmd, AllArgs, Format]),
-
     %% split arguments into Flags, Options, Positional, and create help lines
     {_, Longest, Flags, Opts, Args, OptL, PosL} = lists:foldl(fun format_opt_help/2,
         {Prefix, 0, "", [], [], [], []}, AllArgs),

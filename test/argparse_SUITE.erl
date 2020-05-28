@@ -132,6 +132,11 @@ readme(Config) when is_list(Config) ->
     %% override progname
     ?assertEqual("usage: readme\n",
         argparse:help(#{}, #{progname => "readme"})),
+    ?assertEqual("usage: readme\n",
+        argparse:help(#{}, #{progname => readme})),
+    ?assertException(error, {argparse,
+        {invalid_command, [], progname, "progname must be a list or an atom"}},
+        argparse:help(#{}, #{progname => 123})),
     %% command example
     Cmd = #{
         commands => #{"sub" => #{}},
