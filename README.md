@@ -6,7 +6,9 @@ A simple framework to create complex CLI. Inspired by Python argparse.
 
 Follows conventions of  Unix Utility Argument Syntax.
 
+```shell
     argparse [-abcDxyz][-p arg][operand]
+```
 
 ## Argument parser
 Converts list of strings (command line) into an argument map,and a
@@ -20,30 +22,33 @@ Make a step beyond parser, and export existing Erlang functions: [cli reference]
 
 CLI framework is naturally suitable for building small escript-based apps:
 
+```erlang
     #!/usr/bin/env escript
-    
+
     -export([main/1, cli/0, cli/1]).
     -behaviour(cli).
     -mode(compile). %% evaluated module cannot contain callbacks
-    
+
     main(Args) ->
         cli:run(Args, #{progname => "simple").
-    
+
     cli() ->
         #{arguments => [
             #{name => force, short => $f, type => boolean, default => false},
             #{name => recursive, short => $r, type => boolean, default => false},
             #{name => dir}
         ]}.
-    
+
     cli(#{force := Force, recursive := Recursive, dir := Dir}) ->
         io:format("Removing ~s (force ~s, recursive: ~s)~n",
             [Dir, Force, Recursive]).
+```
 
-The example above does not have sub-commands, and implements optional cli/1
+The example above does not have sub-commands, and implements optional `cli/1`
 callback, that serves as an entry point with parsed arguments. Help options are
 added automatically:
 
+```shell
     $ ./erm --help
     usage: erm [-fr] <dir>
 
@@ -51,7 +56,7 @@ added automatically:
       dir
       -r  recursive, [false]
       -f  force, [false]
-
+```
 
 ## Calc: CLI with [multiple commands](doc/examples/escript/calc)
 
@@ -60,6 +65,7 @@ source code here: [doc/examples/escript/calc](doc/examples/escript/calc)
 
 Command definitions:
 
+```erlang
     cli() ->
         #{
             commands => #{
@@ -86,23 +92,28 @@ Command definitions:
                 }
             }
         }.
+```
 
-Calculator provides "sum" command that prints a sum of integer numbers:
+The calculator provides "sum" command that prints a sum of integer numbers:
 
+```shell
     $ ./calc sum 1 2 3
     6
+```
 
 Math sub-commands provide trigonometric functions:
 
+```shell
     $ ./calc math cos 1.4
     0.16996714290024104
     $ ./calc math sin 1.4
     0.9854497299884601
+```
 
 ## Complex applications
 
 CLI framework is capable of handling releases containing hundreds of modules
-implementing cli behaviour. Commands may be exported from multiple modules and
+implementing cli behavior. Commands may be exported from multiple modules and
 applications. cli framework makes best efforts to merge commands exported,
 format usage output and error messages.
 
@@ -116,33 +127,37 @@ to get a feeling!
 
 ## Argument [parser alone](doc/examples/escript/erm)
 
-It is possible to use argument parser alone, without CLI framework:
+It is possible to use argument parser alone, without the CLI framework:
 
+```erlang
     #!/usr/bin/env escript
-    
+
     main(Args) ->
         #{force := Force, recursive := Recursive, dir := Dir} =
             argparse:parse(Args, cli()),
         io:format("Removing ~s (force: ~s, recursive: ~s)~n",
             [Dir, Force, Recursive]).
-        
+
     cli() ->
         #{arguments => [
             #{name => force, short => $f, type => boolean, default => false},
             #{name => recursive, short => $r, type => boolean, default => false},
             #{name => dir}
         ]}.
+```
 
 ## Help and usage information
 CLI framework automatically prints usage, if command line parser reports an
-error. An attempt is made to guess most relevant command.
+error. An attempt is made to guess the most relevant command.
 
 
 ## Build
 This project requires OTP-22 or above. Simple integration is available via Hex and
 rebar3.
 
+```erlang
     {deps, [argparse]}.
+```
 
 ## Known incompatibilities:
   * boolean flag (option), automatically using {store, true}
@@ -151,7 +166,7 @@ rebar3.
   * implicit --help/-h is not a part of argparse (but implemented in cli)
 
 Commands vs. positional arguments: command always takes precedence
-over positional argument.
+over a positional argument.
 Commands form exclusive groups, e.g. only one command can
 be followed at a time.
 
