@@ -250,7 +250,7 @@ parse(Args, Command, Options) ->
 %% @equiv help(Command, #{})
 -spec help(command() | command_spec()) -> string().
 help(Command) ->
-    format_help(validate(Command), #{}).
+    help(Command, #{}).
 
 %% @doc
 %% Returns help for Command formatted according to Options specified
@@ -285,7 +285,7 @@ format_error({invalid_argument, Path, Name, Value}) ->
 %% @returns string, ready to be printed via io:format().
 -spec format_error(argparse_reason(), command() | command_spec(), parser_options()) -> string().
 format_error(Reason, Command, Options) ->
-    Path = tl(lists:reverse(element(2, Reason))),
+    Path = tl(element(2, Reason)),
     ErrorText = format_error(Reason),
     UsageText = help(Command, Options#{command => Path}),
     ErrorText ++ UsageText.
@@ -766,15 +766,14 @@ default(#{type := atom}) ->
 default(_) ->
     undefined.
 
-%% when parsing, state is stored in a reversed form
-%% when error needs to be formatted, command path should be
-%%  reversed and joined with " "
+%% command path is now in direct order
 format_path(Commands) ->
-    lists:concat(lists:join(" ", lists:reverse(Commands))) ++ ": ".
+    lists:concat(lists:join(" ", Commands)) ++ ": ".
 
 %% to simplify throwing errors with the right reason
 fail(Reason) ->
-    erlang:error({?MODULE, Reason}).
+    FixedPath = lists:reverse(element(2, Reason)),
+    erlang:error({?MODULE, setelement(2, Reason, FixedPath)}).
 
 %%--------------------------------------------------------------------
 %% Validation and preprocessing
@@ -963,11 +962,14 @@ clean_path(Path) ->
 %%  NAME     extra name to pass
 %%
 
-format_help({CmdName, Root}, Format) ->
+format_help({RootCmd, Root}, Format) ->
     Prefix = hd(maps:get(prefixes, Format, [$-])),
     Nested = maps:get(command, Format, []),
     %% descent into commands collecting all options on the way
-    {Cmd, AllArgs} = collect_options(Root, Nested, []),
+    {CmdName, Cmd, AllArgs} = collect_options(RootCmd, Root, Nested, []),
+
+    ct:pal("CmdName: ~p ::: C: ~p AA: ~p, Fmt: ~p", [CmdName, Cmd, AllArgs, Format]),
+
     %% split arguments into Flags, Options, Positional, and create help lines
     {_, Longest, Flags, Opts, Args, OptL, PosL} = lists:foldl(fun format_opt_help/2,
         {Prefix, 0, "", [], [], [], []}, AllArgs),
@@ -1005,12 +1007,12 @@ format_help({CmdName, Root}, Format) ->
         maybe_add("~nOptional arguments:~n~s", FormattedOpts)])).
 
 %% collects options on the Path, and returns found Command
-collect_options(Command, [], Args) ->
-    {Command, maps:get(arguments, Command, []) ++ Args};
-collect_options(Command, [Cmd|Tail], Args) ->
+collect_options(CmdName, Command, [], Args) ->
+    {CmdName, Command, maps:get(arguments, Command, []) ++ Args};
+collect_options(CmdName, Command, [Cmd|Tail], Args) ->
     Sub = maps:get(commands, Command),
     SubCmd = maps:get(Cmd, Sub),
-    collect_options(SubCmd, Tail, maps:get(arguments, Command, []) ++ Args).
+    collect_options(CmdName ++ " " ++ Cmd, SubCmd, Tail, maps:get(arguments, Command, []) ++ Args).
 
 %% conditionally adds text and empty lines
 maybe_add(_ToAdd, []) ->
