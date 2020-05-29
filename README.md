@@ -113,7 +113,7 @@ Math sub-commands provide trigonometric functions:
 ## Complex applications
 
 CLI framework is capable of handling releases containing hundreds of modules
-implementing cli behavior. Commands may be exported from multiple modules and
+implementing cli behaviour. Commands may be exported from multiple modules and
 applications. cli framework makes best efforts to merge commands exported,
 format usage output and error messages.
 
