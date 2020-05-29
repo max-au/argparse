@@ -1,10 +1,42 @@
-# cli Framework
-cli framework is designed to simplify command-line interface integration. From a tiny escript,
+# cli mini-framework
+cli is designed to simplify command-line interface integration. From a tiny escript,
 to a system exporting several hundred commands.
 
-## Basic example
+## Basic [example](examples/escript/simple)
 
-## Advanced example
+Implementing a utility with a single command to run requires:
+1. Compiled code (as evaluated code does not work with callbacks)
+2. 'cli' behaviour declared
+3. cli/0 callback returning arguments map and a handler
+
+
+    #!/usr/bin/env escript
+
+    -export([main/1, cli/0, cli/1]).
+    -behaviour(cli).
+    -mode(compile). %% evaluated module cannot contain callbacks
+
+    main(Args) ->
+        cli:run(Args, #{progname => "simple").
+
+    cli() ->
+        #{arguments => [
+            #{name => force, short => $f, type => boolean, default => false},
+            #{name => recursive, short => $r, type => boolean, default => false},
+            #{name => dir}
+        ]}.
+
+    cli(#{force := Force, recursive := Recursive, dir := Dir}) ->
+        io:format("Removing ~s (force ~s, recursive: ~s)~n",
+            [Dir, Force, Recursive]).
+
+## rebar3 escript [example](examples/conf_reader)
+Creating a new application exposing CLI is as simple as:
+1. Running `rebar3 new escript conf_reader`
+2. Adding `argparse` to `deps` and `escript_incl_apps` in rebar.config
+3. Add a function (`cli/0`) declaring CLI arguments
+4. Use the specification: `argparse:parse(Args, cli())`
+5. Run `rebar3 escriptize` to build the application.
 
 ## Command-line interface discovery
 

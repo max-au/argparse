@@ -4,18 +4,21 @@
 
 -behaviour(cli).
 -mode(compile).
--export([cli/0, cli/3]).
+-export([cli/0, rm/3]).
 
 main(Args) ->
     cli:run(Args, #{progname => "simple", default => undefined}).
 
 cli() ->
-    #{arguments => [
-        #{name => force, short => $f, type => boolean, default => false},
-        #{name => recursive, short => $r, type => boolean, default => false},
-        #{name => dir}
-    ]}.
+    #{
+        handler => {?MODULE, rm, undefined},
+        arguments => [
+            #{name => force, short => $f, type => boolean, default => false},
+            #{name => recursive, short => $r, type => boolean, default => false},
+            #{name => dir}
+        ]
+    }.
 
-cli(Force, Recursive, Dir) ->
+rm(Force, Recursive, Dir) ->
     io:format("Removing ~s (force: ~s, recursive: ~s)~n",
         [Dir, Force, Recursive]).

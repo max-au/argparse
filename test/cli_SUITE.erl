@@ -22,6 +22,7 @@
     test_cli/0, test_cli/1,
     auto_help/0, auto_help/1,
     subcmd_help/0, subcmd_help/1,
+    missing_handler/0, missing_handler/1,
     bare_cli/0, bare_cli/1,
     multi_module/0, multi_module/1,
     warnings/0, warnings/1,
@@ -46,7 +47,7 @@ suite() ->
     [{timetrap, {seconds, 5}}].
 
 all() ->
-    [test_cli, auto_help, subcmd_help, bare_cli, multi_module, warnings, malformed_behaviour].
+    [test_cli, auto_help, subcmd_help, missing_handler, bare_cli, multi_module, warnings, malformed_behaviour].
 
 %%--------------------------------------------------------------------
 %% Helpers
@@ -138,6 +139,7 @@ cli() ->
         handler => optional,
         commands => #{
             "sum" => #{
+                help => "Sums a list of arguments",
                 arguments => [
                     #{name => num, nargs => nonempty_list, type => int, help => "Numbers to sum"}
                 ]
@@ -152,6 +154,7 @@ cli() ->
                 ]
             },
             "mul" => #{
+                help => "Multiplies two arguments",
                 arguments => [
                     #{name => left, type => int},
                     #{name => right, type => int}
@@ -197,7 +200,7 @@ auto_help() ->
     [{doc, "Tests automatic --help and -h switch"}].
 
 auto_help(Config) when is_list(Config) ->
-    Expected = "usage: erm  {math|mul|sum}\n\nSubcommands:\n  math \n  mul  \n  sum  \n",
+    Expected = "usage: erm  {math|mul|sum}\n\nSubcommands:\n  math \n  mul  Multiplies two arguments\n  sum  Sums a list of arguments\n",
     ?assertEqual({ok, Expected}, capture_output(fun () -> cli:run(["--help"], #{progname => "erm"}) end)).
 
 subcmd_help() ->
@@ -216,6 +219,17 @@ subcmd_help(Config) when is_list(Config) ->
     {_Ret2, IO2} = capture_output(fun () -> cli:run(["mycool", "--help"], #{modules => empty}) end),
     ?assertEqual("error: erl: unrecognised argument: mycool\nusage: erl  {foo}\n\nSubcommands:\n  foo myfoo\n", IO2),
     ct:pal("~s", [IO]).
+
+missing_handler() ->
+    [{doc, "Handler can be missing from the module"}].
+
+missing_handler(Config) when is_list(Config) ->
+    CliRet = "#{handler => {missing, foobar}}",
+    FunExport = "foobar/1", FunDefs = "foobar(#{}) -> success.",
+    cli_module(missing, CliRet, FunExport, [FunDefs]),
+    {Ret, IO} = capture_output(fun () -> cli:run([], #{modules => [missing, bare, none]}) end),
+    ?assertEqual(success, Ret),
+    ?assertEqual("", IO).
 
 bare_cli() ->
     [{doc, "Bare cli, no sub-commands"}].

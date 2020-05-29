@@ -10,7 +10,7 @@
 %%%
 %%%  Or, to limit cli behaviour discovery,
 %%%  ```
-%%%     cli:run(Args, #{modules => ?MODULE}).
+%%%     cli:run(Args, #{modules => ?MODULE, progname => ?MODULE}).
 %%%  '''
 %%% Other options available for run/2:
 %%% <ul><li>`modules':<ul>
@@ -20,8 +20,9 @@
 %%% <li>`warn': set to `suppress' suppresses warnings logged</li>
 %%% <li>`help': set to false suppresses printing `usage' when parser produces
 %%%      an error, and disabled default --help/-h behaviour</li>
-%%% <li>`handler' controls which handler form is going to be used to generate
-%%%      default handler, and value to use for missing arguments</li>
+%%% <li>`default': deprecated, value to use for cli/1 callback in a positional form</li>
+%%% <li>`prefixes': prefixes passed to argparse</li>
+%%% <li>`progname': specifies executable name instead of 'erl'</li>
 %%% </ul>
 %%%
 %%% Warnings are printed to OTP logger, unless suppressed.
@@ -48,20 +49,8 @@
 
 %% Callback returning CLI mappings.
 %% Must return a command, that may contain sub-commands.
-%% If there are no sub-commands, and there are no other
-%%  modules loaded that implement cli behaviour,
-%%  then cli/1 callback should also be defined, as it
-%%  represents new entry point.
+%% Also returns arguments, and handler.
 -callback cli() -> argparse:command().
-
-%% Default CLI callback.
-%% Small utility that does not need sub-command should
-%%  export this callback that will be called by run/1.
--callback cli(argparse:arg_map()) -> term().
-
-%% Complex utilities with many command exported
-%%  don't need cli/1.
--optional_callbacks([cli/1]).
 
 %%--------------------------------------------------------------------
 %% API
@@ -82,13 +71,11 @@ run(Args) ->
 %% `warn' set to `suppress' suppresses warnings logged
 %% `help' set to false suppresses printing `usage' when parser produces
 %%      an error, and disabled default --help/-h behaviour
-%% `handler' controls which handler form is going to be used to generate
-%%      default handler, and value to use for missing arguments
 -type run_options() :: #{
     modules => all_loaded | module() | [module()],
     warn => suppress | warn,
     help => boolean(),
-    default => term(),
+    default => term(),      %% deprecated, to be removed in 2.0
     prefixes => [integer()],%% prefixes passed to argparse
     progname => string()    %% specifies executable name instead of 'erl'
 }.
@@ -101,23 +88,12 @@ run(Args) ->
 %% @returns callback result, ok 'ok' when help/error message printed.
 -spec run([string()], run_options()) -> term().
 run(Args, Options) ->
-    ParserOptions = copy_options([prefixes, progname], Options, #{}),
-    run_impl(Args, ParserOptions,
-        modules(maps:get(modules, Options, all_loaded)), Options).
+    Modules = modules(maps:get(modules, Options, all_loaded)),
+    CmdMap = discover_commands(Modules, Options),
+    dispatch(Args, CmdMap, Modules, Options).
 
 %%--------------------------------------------------------------------
 %% Internal implementation
-
-%% Conditionally copy items from one map to another
-%% next 5 lines of code make Dialyzer happy. Otherwise
-%%  it rightfully says "your parser options also contain
-%%  run options"
-copy_options([], _Options, Acc) ->
-    Acc;
-copy_options([Head|Tail], Options, Acc) when is_map_key(Head, Options) ->
-    copy_options(Tail, Options, Acc#{Head => maps:get(Head, Options)});
-copy_options([_Head|Tail], Options, Acc) ->
-    copy_options(Tail, Options, Acc).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -138,15 +114,14 @@ behaviours(Module) ->
     lists:flatten(proplists:get_all_values(behavior, Attrs) ++
         proplists:get_all_values(behaviour, Attrs)).
 
-%% Dispatches Args over Modules, with specified ErrMode
-run_impl(Args, ArgOpts, Modules, Options) ->
+%%
+discover_commands(Modules, Options) ->
     Warn = maps:get(warn, Options, warn),
-    HelpEnabled = maps:get(help, Options, false),
     ModCount = length(Modules),
-    CmdMap = lists:foldl(
+    lists:foldl(
         fun (Mod, Cmds) ->
             ModCmd =
-                try {_, MCmd} = argparse:validate(Mod:cli(), ArgOpts), MCmd
+                try {_, MCmd} = argparse:validate(Mod:cli(), Options), MCmd
                 catch
                     Class:Reason:Stack when Warn =:= warn ->
                         ?LOG_WARNING("Error calling ~s:cli(): ~s:~p~n~p",
@@ -155,15 +130,22 @@ run_impl(Args, ArgOpts, Modules, Options) ->
                             #{}
                 end,
             %% handlers: use first non-empty handler
-            Cmds1 =
-                if (not is_map_key(handler, Cmds)) andalso is_map_key(handler, ModCmd) ->
-                    Cmds#{handler => maps:get(handler, ModCmd)};
-                    true -> Cmds
-                end,
+            Cmds1 = case maps:find(handler, ModCmd) of
+                {ok, Handler} when is_map_key(handler, Cmds) ->
+                    %% merge handler - and warn when not suppressed
+                    Warn =:= warn andalso
+                        ?LOG_WARNING("Multiple handlers defined for top-level command, ~p chosen, ~p ignored",
+                            [maps:get(handler, Cmds), Handler]),
+                    Cmds;
+                {ok, Handler} ->
+                    Cmds#{handler => Handler};
+                error ->
+                    Cmds
+            end,
             %% help: concatenate help lines
             Cmds2 =
                 if is_map_key(help, ModCmd) ->
-                    Cmds1#{help => maps:get(handler, ModCmd) ++ maps:get(help, Cmds1, "")};
+                    Cmds1#{help => maps:get(help, ModCmd) ++ maps:get(help, Cmds1, "")};
                     true -> Cmds1
                 end,
             %% merge arguments, and warn if warnings are not suppressed, and there
@@ -172,47 +154,55 @@ run_impl(Args, ArgOpts, Modules, Options) ->
                 (ModCount > 1 andalso Warn =:= warn), Cmds2),
             %% merge commands
             merge_commands(maps:get(commands, ModCmd, #{}), Mod, Options, Cmds3)
-        end, #{}, Modules),
+        end, #{}, Modules).
+
+%% Dispatches Args over Modules, with specified ErrMode
+dispatch(Args, CmdMap, Modules, Options) ->
+    HelpEnabled = maps:get(help, Options, false),
     %% attempt to dispatch the command
-    try argparse:parse(Args, CmdMap, ArgOpts) of
-        {ArgMap, {Path, #{handler := {Mod, ModFun, Default}}}} ->
-            ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),
-            %% if argument count may not match, better error can be produced
-            erlang:apply(Mod, ModFun, ArgList);
-        {ArgMap, {_Path, #{handler := {Mod, ModFun}}}} when is_atom(Mod), is_atom(ModFun) ->
-            Mod:ModFun(ArgMap);
-        {ArgMap, {Path, #{handler := {Fun, Default}}}} when is_function(Fun) ->
-            ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),
-            %% if argument count may not match, better error can be produced
-            erlang:apply(Fun, ArgList);
-        {ArgMap, {_Path, #{handler := Handler}}} when is_function(Handler, 1) ->
-            Handler(ArgMap);
+    try argparse:parse(Args, CmdMap, Options) of
+        {ArgMap, PathTo} ->
+            run_handler(CmdMap, ArgMap, PathTo, undefined);
         ArgMap ->
-            %% simple CLI with no sub-commands?
-            case maps:find(default, Options) of
-                error ->
-                    %% find any module of Modules, exporting cli/1,
-                    %%  and call it
-                    exec_cli(Modules, CmdMap, [ArgMap], ArgOpts);
-                {ok, Default} ->
-                    ArgList = arg_map_to_arg_list(CmdMap, [], ArgMap, Default),
-                    exec_cli(Modules, CmdMap, ArgList, ArgOpts)
-            end
+            %{ maps:find(default, Options), Modules, Options}
+            run_handler(CmdMap, ArgMap, {[], CmdMap}, {Modules, Options})
     catch
         error:{argparse, Reason} when HelpEnabled ->
             io:format("error: ~s", [argparse:format_error(Reason)]);
         error:{argparse, Reason} ->
             %% see if it was cry for help that triggered error message
-            Prefixes = maps:get(prefixes, ArgOpts, "-"),
+            Prefixes = maps:get(prefixes, Options, "-"),
             case help_requested(Reason, Prefixes) of
                 false ->
-                    Fmt = argparse:format_error(Reason, CmdMap, ArgOpts),
+                    Fmt = argparse:format_error(Reason, CmdMap, Options),
                     io:format("error: ~s", [Fmt]);
                 CmdPath ->
-                    Fmt = argparse:help(CmdMap, ArgOpts#{command => tl(CmdPath)}),
+                    Fmt = argparse:help(CmdMap, Options#{command => tl(CmdPath)}),
                     io:format("~s", [Fmt])
             end
     end.
+
+%% Executes handler
+run_handler(CmdMap, ArgMap, {Path, #{handler := {Mod, ModFun, Default}}}, _MO) ->
+    ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),
+    %% if argument count may not match, better error can be produced
+    erlang:apply(Mod, ModFun, ArgList);
+run_handler(_CmdMap, ArgMap, {_Path, #{handler := {Mod, ModFun}}}, _MO) when is_atom(Mod), is_atom(ModFun) ->
+    Mod:ModFun(ArgMap);
+run_handler(CmdMap, ArgMap, {Path, #{handler := {Fun, Default}}}, _MO) when is_function(Fun) ->
+    ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),
+    %% if argument count may not match, better error can be produced
+    erlang:apply(Fun, ArgList);
+run_handler(_CmdMap, ArgMap, {_Path, #{handler := Handler}}, _MO) when is_function(Handler, 1) ->
+    Handler(ArgMap);
+%% below is compatibility mode: cli/1 behaviour has been removed in 1.1.0, but
+%%  is still honoured for existing users
+run_handler(CmdMap, ArgMap, {[], _}, {Modules, Options}) when is_map_key(default, Options) ->
+    ArgList = arg_map_to_arg_list(CmdMap, [], ArgMap, maps:get(default, Options)),
+    exec_cli(Modules, CmdMap, ArgList, Options);
+run_handler(CmdMap, ArgMap, {[], _}, {Modules, Options}) ->
+    % {undefined, {ok, Default}, Modules, Options}
+    exec_cli(Modules, CmdMap, [ArgMap], Options).
 
 %% finds first module that exports ctl/1 and execute it
 exec_cli([], CmdMap, _ArgMap, ArgOpts) ->
