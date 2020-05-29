@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/max-au/argparse.svg?branch=master)](https://travis-ci.org/max-au/argparse)
 
-A simple framework to create complex CLI. Inspired by Python argparse.
+A mini-framework to create complex cli. Inspired by Python argparse.
 
 Follows conventions of  Unix Utility Argument Syntax.
 
@@ -14,18 +14,18 @@ Follows conventions of  Unix Utility Argument Syntax.
 Converts list of strings (command line) into an argument map,and a
 command path; see [argparse reference](doc/ARGPARSE.md) for detailed description.
 
-## CLI Framework
+## cli mini-framework
 Make a step beyond parser, and export existing Erlang functions: [cli reference](doc/CLI.md)
 
 
 ## Basic [example](doc/examples/escript/simple)
 
-CLI framework is naturally suitable for building small escript-based apps:
+cli is naturally suitable for building small escript-based apps:
 
 ```erlang
     #!/usr/bin/env escript
 
-    -export([main/1, cli/0, cli/1]).
+    -export([main/1, cli/0, rm/1]).
     -behaviour(cli).
     -mode(compile). %% evaluated module cannot contain callbacks
 
@@ -33,19 +33,21 @@ CLI framework is naturally suitable for building small escript-based apps:
         cli:run(Args, #{progname => "simple").
 
     cli() ->
-        #{arguments => [
-            #{name => force, short => $f, type => boolean, default => false},
-            #{name => recursive, short => $r, type => boolean, default => false},
-            #{name => dir}
-        ]}.
+      #{
+        handler => {?MODULE, rm},
+        arguments => [
+          #{name => force, short => $f, type => boolean, default => false},
+          #{name => recursive, short => $r, type => boolean, default => false},
+          #{name => dir}
+      ]}.
 
-    cli(#{force := Force, recursive := Recursive, dir := Dir}) ->
+    rm(#{force := Force, recursive := Recursive, dir := Dir}) ->
         io:format("Removing ~s (force ~s, recursive: ~s)~n",
             [Dir, Force, Recursive]).
 ```
 
-The example above does not have sub-commands, and implements optional `cli/1`
-callback, that serves as an entry point with parsed arguments. Help options are
+The example above does not have sub-commands, and implements `rm/1`
+handler, that serves as an entry point with parsed arguments. Help options are
 added automatically:
 
 ```shell
@@ -58,7 +60,7 @@ added automatically:
       -f  force, [false]
 ```
 
-## Calc: CLI with [multiple commands](doc/examples/escript/calc)
+## Calc: cli with [multiple commands](doc/examples/escript/calc)
 
 Calculator implements several commands, with sub-commands available. Full
 source code here: [doc/examples/escript/calc](doc/examples/escript/calc)
@@ -112,9 +114,9 @@ Math sub-commands provide trigonometric functions:
 
 ## Complex applications
 
-CLI framework is capable of handling releases containing hundreds of modules
+cli is capable of handling releases containing hundreds of modules
 implementing cli behaviour. Commands may be exported from multiple modules and
-applications. cli framework makes best efforts to merge commands exported,
+applications. cli makes best efforts to merge commands exported,
 format usage output and error messages.
 
 See example: [doc/examples/multi](doc/examples/multi)
@@ -127,7 +129,7 @@ to get a feeling!
 
 ## Argument [parser alone](doc/examples/escript/erm)
 
-It is possible to use argument parser alone, without the CLI framework:
+It is possible to use argument parser alone, without the cli mini-framework:
 
 ```erlang
     #!/usr/bin/env escript
@@ -147,7 +149,7 @@ It is possible to use argument parser alone, without the CLI framework:
 ```
 
 ## Help and usage information
-CLI framework automatically prints usage, if command line parser reports an
+cli automatically prints usage, if command line parser reports an
 error. An attempt is made to guess the most relevant command.
 
 
@@ -198,6 +200,11 @@ To be considered after 1.0.0:
 * automatically generated negative boolean long forms "--no-XXXX"
 
 ## Changelog
+
+Version 1.1.0:
+ * Handler support for minimal CLI
+ * cli/1 optional behaviour callback deprecated
+ * Ability to provide progname as an atom
 
 Version 1.0.2:
  * Improved documentation
