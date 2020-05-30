@@ -19,7 +19,7 @@
 %%%     <li>[module()]   - list of modules (must export `cli/0')</li></ul></li>
 %%% <li>`warn': set to `suppress' suppresses warnings logged</li>
 %%% <li>`help': set to false suppresses printing `usage' when parser produces
-%%%      an error, and disabled default --help/-h behaviour</li>
+%%%      an error, and disables default --help/-h behaviour</li>
 %%% <li>`default': deprecated, value to use for cli/1 callback in a positional form</li>
 %%% <li>`prefixes': prefixes passed to argparse</li>
 %%% <li>`progname': specifies executable name instead of 'erl'</li>
@@ -70,7 +70,7 @@ run(Args) ->
 %%     [module()]     for a list of modules (may not have `cli' behaviour)
 %% `warn' set to `suppress' suppresses warnings logged
 %% `help' set to false suppresses printing `usage' when parser produces
-%%      an error, and disabled default --help/-h behaviour
+%%      an error, and disables default --help/-h behaviour
 -type run_options() :: #{
     modules => all_loaded | module() | [module()],
     warn => suppress | warn,
@@ -158,7 +158,7 @@ discover_commands(Modules, Options) ->
 
 %% Dispatches Args over Modules, with specified ErrMode
 dispatch(Args, CmdMap, Modules, Options) ->
-    HelpEnabled = maps:get(help, Options, false),
+    HelpEnabled = maps:get(help, Options, true),
     %% attempt to dispatch the command
     try argparse:parse(Args, CmdMap, Options) of
         {ArgMap, PathTo} ->
@@ -167,7 +167,7 @@ dispatch(Args, CmdMap, Modules, Options) ->
             %{ maps:find(default, Options), Modules, Options}
             run_handler(CmdMap, ArgMap, {[], CmdMap}, {Modules, Options})
     catch
-        error:{argparse, Reason} when HelpEnabled ->
+        error:{argparse, Reason} when HelpEnabled =:= false ->
             io:format("error: ~s", [argparse:format_error(Reason)]);
         error:{argparse, Reason} ->
             %% see if it was cry for help that triggered error message
@@ -230,8 +230,6 @@ merge_arguments(Args, Warn, Existing) ->
 %%  can never clash. Yet for cli it is possible when multiple modules
 %%  export command with the same name. For this case, skip duplicate
 %%  command names, emitting a warning.
-merge_commands([], _, _, Existing) ->
-    Existing;
 merge_commands(Cmds, Mod, Options, Existing) ->
     Warn = maps:get(warn, Options, warn),
     MergedCmds = maps:fold(
@@ -275,7 +273,12 @@ create_handlers(Mod, CmdName, Cmd0, DefaultTerm) ->
 
 %% makes handler in required format
 make_handler(CmdName, Mod, error) ->
-    {Mod, list_to_existing_atom(CmdName)};
+    try
+        {Mod, list_to_existing_atom(CmdName)}
+    catch
+        error:badarg ->
+            error({invalid_command, [CmdName], handler, "handler for command does not exist"})
+    end;
 make_handler(CmdName, Mod, {ok, Default}) ->
     {Mod, list_to_existing_atom(CmdName), Default}.
 

@@ -987,8 +987,10 @@ format_help({RootCmd, Root}, Format) ->
     Commands = lists:concat([io_lib:format(SubFormat, [N, D]) || {N, D} <- lists:reverse(Subs)]),
     ShortCmd =
         case map_size(Immediate) of
-            0 ->
+            0 when Nested =:= [] ->
                 "";
+            0 ->
+                [$ | lists:concat(lists:join(" ", Nested))];
             Small when Small < 4 ->
                 " " ++ lists:concat(lists:join(" ", Nested)) ++  " {" ++
                     lists:concat(lists:join("|", maps:keys(Immediate))) ++ "}";
@@ -1003,7 +1005,8 @@ format_help({RootCmd, Root}, Format) ->
     FormattedOpts = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- lists:reverse(OptL)],
     FormattedArgs = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- lists:reverse(PosL)],
     %% format first usage line
-    lists:flatten(io_lib:format("usage: ~s~s~s~s~s~n~s~s~s", [CmdName, ShortCmd, FlagsForm, Opts, Args,
+    lists:flatten(io_lib:format("usage: ~s~s~s~s~s~s~n~s~s~s", [RootCmd, ShortCmd, FlagsForm, Opts, Args,
+        maybe_add("~n~s", maps:get(help, Root, "")),
         maybe_add("~nSubcommands:~n~s", Commands),
         maybe_add("~nArguments:~n~s", FormattedArgs),
         maybe_add("~nOptional arguments:~n~s", FormattedOpts)])).

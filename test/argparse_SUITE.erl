@@ -334,6 +334,12 @@ errors(Config) when is_list(Config) ->
     Opt3 = #{name => kernel, long => "kernel", type => atom, nargs => 2},
     ?assertException(error, {argparse, {invalid_argument, _, kernel, ["port"]}},
         parse_cmd(["start -kernel port"], #{"start" => #{arguments => [Opt3]}})),
+    %% not-a-list of arguments
+    ?assertException(error, {argparse, {invalid_command, _, commands,"options must be a list"}},
+        parse_cmd([], #{"start" => #{arguments => atom}})),
+    %% command is not a map
+    ?assertException(error, {argparse, {invalid_command, _, commands,"command description must be a map"}},
+        parse_cmd([], #{"start" => []})),
     %% positional argument missing some items
     Opt4 = #{name => arg, type => atom, nargs => 2},
     ?assertException(error, {argparse, {invalid_argument, _, arg, ["p1"]}},

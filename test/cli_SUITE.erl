@@ -34,7 +34,6 @@
 -export([
     cli/0,
     cli/1,
-    sum/1,
     cos/1,
     mul/2
 ]).
@@ -140,6 +139,7 @@ cli() ->
         commands => #{
             "sum" => #{
                 help => "Sums a list of arguments",
+                handler => fun (#{num := Nums}) -> lists:sum(Nums) end,
                 arguments => [
                     #{name => num, nargs => nonempty_list, type => int, help => "Numbers to sum"}
                 ]
@@ -147,7 +147,8 @@ cli() ->
             "math" => #{
                 commands => #{
                     "sin" => #{},
-                    "cos" => #{}
+                    "cos" => #{handler => {fun (X) -> math:cos(X) end, undefined}, help => "Calculates cosinus"},
+                    "extra" => #{commands => #{"ok" => #{}, "fail" => #{}}, handler => optional}
                     },
                 arguments => [
                     #{name => in, type => float, help => "Input value"}
@@ -168,9 +169,6 @@ cli() ->
 
 cli(#{}) ->
     success.
-
-sum(#{num := Nums}) ->
-    lists:sum(Nums).
 
 cos(#{in := In}) ->
     math:cos(In).
@@ -193,6 +191,10 @@ test_cli(Config) when is_list(Config) ->
     Expected = "error: erm sum: required argument missing: num\nusage: erm",
     {ok, Actual} = capture_output(fun () -> cli:run(["sum"], #{progname => "erm"}) end),
     ?assertEqual(Expected, lists:sublist(Actual, length(Expected))),
+    %% test when help => false
+    Expected1 = "error: erm sum: required argument missing: num\n",
+    {ok, Actual1} = capture_output(fun () -> cli:run(["sum"], #{progname => "erm", help => false}) end),
+    ?assertEqual(Expected1, Actual1),
     %% test "catch-all" handler
     ?assertEqual(success, cli:run([])).
 
@@ -200,8 +202,36 @@ auto_help() ->
     [{doc, "Tests automatic --help and -h switch"}].
 
 auto_help(Config) when is_list(Config) ->
-    Expected = "usage: erm  {math|mul|sum}\n\nSubcommands:\n  math \n  mul  Multiplies two arguments\n  sum  Sums a list of arguments\n",
-    ?assertEqual({ok, Expected}, capture_output(fun () -> cli:run(["--help"], #{progname => "erm"}) end)).
+    erlang:system_flag(backtrace_depth, 42),
+    Expected = "usage: erm  {math|mul|sum}\n\nSubcommands:\n  math \n  mul"
+        "  Multiplies two arguments\n  sum  Sums a list of arguments\n",
+    ?assertEqual({ok, Expected}, capture_output(fun () -> cli:run(["--help"], #{progname => "erm"}) end)),
+    %% add more modules
+    cli_module(auto_help, "#{help => \"description\"}", undefined, []),
+    Expected1 = "usage: erm  {math|mul|sum}\ndescription\n\nSubcommands:\n  math"
+        " \n  mul  Multiplies two arguments\n  sum  Sums a list of arguments\n",
+    ?assertEqual({ok, Expected1}, capture_output(fun () -> cli:run(["-h"], #{progname => "erm",
+        modules => [?MODULE, auto_help]}) end)),
+    %% request help for a subcommand
+    Expected2 = "usage: erl math {cos|extra|sin} <in>\n\nSubcommands:\n  cos   "
+        "Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value, float\n",
+    ?assertEqual({ok, Expected2}, capture_output(fun () -> cli:run(["math", "--help"],
+        #{modules => [?MODULE]}) end)),
+    %% request help for a sub-subcommand
+    Expected3 = "usage: erl math extra {fail|ok} <in>\n\nSubcommands:\n  fail \n"
+        "  ok   \n\nArguments:\n  in Input value, float\n",
+    ?assertEqual({ok, Expected3}, capture_output(fun () -> cli:run(["math", "extra", "--help"],
+        #{modules => ?MODULE}) end)),
+    %% request help for a sub-sub-subcommand
+    Expected4 = "usage: erl math cos <in>\n\nArguments:\n  in Input value, float\n",
+    ?assertEqual({ok, Expected4}, capture_output(fun () -> cli:run(["math", "cos", "--help"],
+        #{modules => ?MODULE}) end)),
+    %% request help in a really wrong way (subcommand does not exist)
+    Expected5 =
+        "error: erl math: invalid argument bad for: in\nusage: erl math {cos|extra|sin} <in>\n\nSubcommands:\n"
+        "  cos   Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value, float\n",
+    ?assertEqual({ok, Expected5}, capture_output(fun () -> cli:run(["math", "bad", "--help"],
+        #{modules => ?MODULE}) end)).
 
 subcmd_help() ->
     [{doc, "Tests that help for an empty command list does not fail"}].
@@ -216,7 +246,7 @@ subcmd_help(Config) when is_list(Config) ->
     {_Ret1, IO1} = capture_output(fun () -> cli:run(["--help"], #{modules => empty}) end),
     ?assertEqual("usage: erl  {foo}\n\nSubcommands:\n  foo myfoo\n", IO1),
     %% capture broken help output
-    {_Ret2, IO2} = capture_output(fun () -> cli:run(["mycool", "--help"], #{modules => empty}) end),
+    {_Ret2, IO2} = capture_output(fun () -> cli:run(["mycool", "--help"], #{modules => [empty]}) end),
     ?assertEqual("error: erl: unrecognised argument: mycool\nusage: erl  {foo}\n\nSubcommands:\n  foo myfoo\n", IO2),
     ct:pal("~s", [IO]).
 
@@ -269,7 +299,11 @@ warnings(Config) when is_list(Config) ->
     ?assertEqual(warning, Lvl),
     ?assertEqual("Error calling ~s:cli(): ~s:~p~n~p", Fmt),
     %% ensure no log line added when suppression is requested
-    {ok, IO, LogZero} = capture_output_and_log(fun () -> cli:run(["sum"], #{modules => nomodule, warn => suppress}) end),
+    cli_module(warn, "#{commands => #{\"sum\" => #{}}}", undefined, []),
+    {Sum, SumText, LogZero} = capture_output_and_log(fun () -> cli:run(["sum", "0"],
+        #{modules => [?MODULE, warn], warn => suppress}) end),
+    ?assertEqual("", SumText),
+    ?assertEqual(0, Sum),
     ?assertEqual([], LogZero).
 
 simple() ->
