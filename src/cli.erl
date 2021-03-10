@@ -182,6 +182,10 @@ dispatch(Args, CmdMap, Modules, Options) ->
             end
     end.
 
+%% Dialyzer: suppress the warning about deprecated feature (it has been
+%%  removed from successful typing to facilitate deprecation).
+-dialyzer({no_match, run_handler/4}).
+
 %% Executes handler
 run_handler(CmdMap, ArgMap, {Path, #{handler := {Mod, ModFun, Default}}}, _MO) ->
     ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),

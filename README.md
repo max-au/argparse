@@ -151,7 +151,7 @@ It is possible to use argument parser alone, without the cli mini-framework:
 ## Help and usage information
 cli automatically prints usage, if command line parser reports an
 error. An attempt is made to guess the most relevant command.
-
+Argument help can be customised.
 
 ## Build
 This project requires OTP-22 or above. Simple integration is available via Hex and
@@ -193,13 +193,15 @@ To be considered after 1.0.0:
 * search for commands and arguments (mini-man)
 * abbreviated long forms
 * mutual exclusion groups
-* support templates in help lines
 * handler hooks (global options support)
 * shell auto-complete
 * support for "--arg=value" form
 * automatically generated negative boolean long forms "--no-XXXX"
 
 ## Changelog
+
+Version 1.1.1:
+ * added templates for help text
 
 Version 1.1.0:
  * Handler support for minimal CLI

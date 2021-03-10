@@ -26,7 +26,8 @@
     usage/0, usage/1,
     readme/0, readme/1,
     error_usage/0, error_usage/1,
-    meta/0, meta/1
+    meta/0, meta/1,
+    usage_template/0, usage_template/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -40,7 +41,7 @@ groups() ->
     [{parallel, [parallel], [
         basic, single_arg_built_in_types, complex_command, errors, args, argparse, negative,
         nodigits,  python_issue_15112, type_validators, subcommand, error_format,
-        very_short, multi_short, usage, readme, error_usage, meta
+        very_short, multi_short, usage, readme, error_usage, meta, usage_template
     ]}].
 
 all() ->
@@ -96,19 +97,22 @@ ubiq_cmd() ->
                     #{name => u, short => $u, type => {string, ["1", "2"]}, help => "string choices"},
                     #{name => choice, short => $c, type => {int, [1,2,3]}, help => "tough choice"},
                     #{name => fc, short => $q, type => {float, [2.1,1.2]}, help => "floating choice"},
-                    #{name => name, required => false, nargs => list, help => "extra name to pass"}
+                    #{name => name, required => false, nargs => list, help => "extra name to pass"},
+                    #{name => long, long => "foobar", required => false, help => "foobaring option"}
                 ], commands => #{
                     "crawler" => #{arguments => [
                         #{name => extra, long => "--extra", help => "extra option very deep"}
                     ],
-                        help => "controls crawler behaviour"}}
+                        help => "controls crawler behaviour"},
+                    "doze" => #{help => "dozes a bit"}}
             },
             "stop" => #{help => "stops running server", arguments => []
             },
             "status" => #{help => "prints server status", arguments => []
             },
             "restart" => #{help => "restarts server specified", arguments => [
-                #{name => server, help => "server to restart"}
+                #{name => server, help => "server to restart"},
+                #{name => duo, short => $d, long => "-duo", help => "dual option"}
             ]}
     }
     }.
@@ -617,6 +621,7 @@ usage(Config) when is_list(Config) ->
     Cmd = ubiq_cmd(),
     ct:pal("~s", [argparse:help(Cmd, #{command => ["start"]})]),
     ct:pal("~s", [argparse:help(Cmd)]),
+    ct:pal("~s", [argparse:help(Cmd, #{command => ["start", "crawler"]})]),
     ok.
 
 error_usage() ->
@@ -649,4 +654,48 @@ meta(Config) when is_list(Config) ->
     ?assertEqual(#{short49 => 2},
         parse("-1 arg1 --force", #{arguments =>
         [#{action => count, long => "-force", name => short49, nargs => maybe, short => 49}]})),
+    ok.
+
+usage_template() ->
+    [{doc, "Tests templates in help/usage"}].
+
+usage_template(Config) when is_list(Config) ->
+    %% Argument (positional)
+    Cmd = #{arguments => [#{
+        name => shard,
+        type => int,
+        default => 0,
+        help => {"[-s SHARD]", ["initial number, ", type, " with a default value of ", default]}}
+    ]},
+    ?assertEqual("usage: erl [-s SHARD]\n\nArguments:\n  shard initial number, int with a default value of 0\n",
+        argparse:help(Cmd, #{})),
+    %% Optional
+    Cmd1 = #{arguments => [#{
+        name => shard,
+        short => $s,
+        type => int,
+        default => 0,
+        help => {"[-s SHARD]", ["initial number"]}}
+    ]},
+    ?assertEqual("usage: erl [-s SHARD]\n\nOptional arguments:\n  -s initial number\n",
+        argparse:help(Cmd1, #{})),
+    %% ISO Date example
+    DefaultRange = {{2020, 1, 1}, {2020, 6, 22}},
+    CmdISO = #{
+        arguments => [
+            #{
+                name => range,
+                long => "-range",
+                short => $r,
+                help => {"[--range RNG]", fun() ->
+                    {{FY, FM, FD}, {TY, TM, TD}} = DefaultRange,
+                    lists:flatten(io_lib:format("date range, ~b-~b-~b..~b-~b-~b", [FY, FM, FD, TY, TM, TD]))
+                                              end},
+                type => {custom, fun(S) -> [S, DefaultRange] end},
+                default => DefaultRange
+            }
+        ]
+    },
+    ?assertEqual("usage: erl [--range RNG]\n\nOptional arguments:\n  -r, --range date range, 2020-1-1..2020-6-22\n",
+        argparse:help(CmdISO, #{})),
     ok.
