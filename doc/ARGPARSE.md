@@ -92,12 +92,13 @@ Command names cannot start with prefix character.
 Every argument spec must have **name** field. Name defines key in the parsed
 arguments map, similar to *dest* field of Python library. It is allowed to have
 multiple arguments with the same name (option aliases):
-
+```erlang
     options => [
         #{name => foo, short => $f},
         #{name => foo, long => "-foo"},
         #{name => foo}
     ].
+```
 
 An argument can be:
 * *optional*: matching command line arguments with prefix character
@@ -110,14 +111,14 @@ defined as number (```#{name => one, short => $1}```).
 Argument is *optional* when **short** or **long** field is defined. Short form may only
 contain a single character, and long form may contain any string. A single prefix
 character is automatically prepended to long forms, so for this example:
-
+```erlang
     #{name => myarg, short => $m, long => "-myarg"}
-
+```
 Argument ```myarg``` can be specified as ```-m``` or as ```--myarg```. Please not that it
 is possible to have long forms with a single prefix character:
-
+```erlang
     #{name => kernel, long => "kernel"}
-
+```
 By default, optional arguments are not required and may be omitted from command line.
 Positional arguments are required. It is possible to override this behaviour by
 setting **required** field.
@@ -169,9 +170,9 @@ line input.
 
 For int, float, string, binary and atom, it is also possible to specify list of
 choices that will pass validation:
-
+```erlang
     #{name => choices, short => $c, type => {string, ["one", "two", "three"]}}
-
+```
 Custom function may throw ```erlang:error(invalid_argument)```, to utilise built-in
 validation information. If any other exception is raised, it is passed with no conversion.
 
@@ -184,12 +185,47 @@ It is not allowed to store user-defined fields in arguments.
 ## Errors
 
 Argparse throws exceptions of class error, and Reason tuple:
-
+```erlang
     {argparse, ArgParseError}
-
+```
 To get human-readable representation:
-
+```erlang
     try argparse:parse(Args, Command)
     catch error:{argparse, Reason} ->
         io:format(argparse:format_error(Reason, Command, #{}))
     end.
+```
+
+## Help templates
+
+It is possible to override help text generated for arguments. By default,
+options are formatted with "help text, type, default", e.g.:
+
+    crawl [-s <shard>...] [-z <last>] [-c <choice>]
+
+    Optional arguments:
+      -s     initial shards, int
+      -z     last shard, between, 100 < int < 200, 150
+      -c     tough choice, choice: 1, 2, 3
+
+It is possible to override the description, and print it this way:
+
+    crawl [-s SHARD] [-c CHOICE]
+
+    Optional arguments:
+      -s     initial number, int, with a default value of 0
+      -z     150, number of last shard, unless overridden
+      -c     custom parameter, to choose from 1, 2 or 3
+
+Example:
+```erlang
+  #{
+    arguments => [
+      #{
+        name => shard,
+        default => 0,
+        help => {"[-s SHARD]", ["initial number, ", type, " with a default value of ", default]}}
+    ]}
+```
+First element of the tuple replaces `[-s <shard>]` with `[-s SHARD]` in command line example, and
+second defines detailed help template.
