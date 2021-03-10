@@ -81,11 +81,9 @@
     {atom, unsafe} |
     {custom, fun((string()) -> term())}.
 
-%% @doc
 %% Help template definition for argument. Short and long forms exist for every argument.
 %% Short form is printed together with command definition, e.g. "usage: rm [--force]",
 %%  while long description is printed in detailed section below: "--force   forcefully remove".
-%% @end
 -type argument_help() :: {
     string(), %% short form, printed in command usage, e.g. "[--dir <dirname>]", developer is
               %%    responsible for proper formatting (e.g. adding <>, dots... and so on)
