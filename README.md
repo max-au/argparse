@@ -30,7 +30,7 @@ cli is naturally suitable for building small escript-based apps:
     -mode(compile). %% evaluated module cannot contain callbacks
 
     main(Args) ->
-        cli:run(Args, #{progname => "simple").
+        cli:run(Args, #{progname => "simple"}).
 
     cli() ->
       #{
