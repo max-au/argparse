@@ -1,7 +1,5 @@
 # argparse: command line parser for Erlang
 
-[![Build Status](https://travis-ci.org/max-au/argparse.svg?branch=master)](https://travis-ci.org/max-au/argparse)
-
 A mini-framework to create complex cli. Inspired by Python argparse.
 
 Follows conventions of  Unix Utility Argument Syntax.
