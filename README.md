@@ -197,6 +197,8 @@ To be considered after 1.0.0:
 * automatically generated negative boolean long forms "--no-XXXX"
 
 ## Changelog
+Version 1.2.0:
+ * Remote CLI support
 
 Version 1.1.1:
  * added templates for help text

@@ -41,7 +41,8 @@
 
 -export([
     run/1,
-    run/2
+    run/2,
+    run/4
 ]).
 
 %%--------------------------------------------------------------------
@@ -91,6 +92,21 @@ run(Args, Options) ->
     Modules = modules(maps:get(modules, Options, all_loaded)),
     CmdMap = discover_commands(Modules, Options),
     dispatch(Args, CmdMap, Modules, Options).
+
+-type scope() :: term().
+
+-spec run(node(), scope(), [string()], run_options()) -> term() | {badrpc, term()}.
+run(Node, _Scope, Args, Options) when is_atom(Node), is_list(Args), is_map(Options) ->
+    %% connect to a remote node - using hidden connection and
+    %%  dynamically obtained node name
+    case net_kernel:connect_node(Node) of
+        true ->
+            %% other node may not have CLI framework at all
+            rpc:call(Node, cli, run, [Args, Options]);
+        false ->
+            io:format("Unable to connect to ~s~n", [Node]),
+            {'EXIT', noconnection}
+    end.
 
 %%--------------------------------------------------------------------
 %% Internal implementation

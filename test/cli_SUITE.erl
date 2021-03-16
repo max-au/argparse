@@ -27,7 +27,8 @@
     multi_module/0, multi_module/1,
     warnings/0, warnings/1,
     simple/0, simple/1,
-    malformed_behaviour/0, malformed_behaviour/1
+    malformed_behaviour/0, malformed_behaviour/1,
+    remote_cli/0, remote_cli/1
 ]).
 
 %% Internal exports
@@ -35,7 +36,8 @@
     cli/0,
     cli/1,
     cos/1,
-    mul/2
+    mul/2,
+    start_server/1
 ]).
 
 -export([log/2]).
@@ -46,7 +48,9 @@ suite() ->
     [{timetrap, {seconds, 5}}].
 
 all() ->
-    [test_cli, auto_help, subcmd_help, missing_handler, bare_cli, multi_module, warnings, malformed_behaviour].
+    [test_cli, auto_help, subcmd_help, missing_handler, bare_cli,
+        multi_module, warnings, malformed_behaviour,
+        remote_cli].
 
 %%--------------------------------------------------------------------
 %% Helpers
@@ -332,3 +336,20 @@ malformed_behaviour(Config) when is_list(Config) ->
     [#{level := Lvl, msg := {Fmt, _Args}}] = Log,
     ?assertEqual("Error calling ~s:cli(): ~s:~p~n~p", Fmt),
     ?assertEqual(warning, Lvl).
+
+%%--------------------------------------------------------------------
+%% Multi-node calls
+
+remote_cli() ->
+    [{doc, "Executes CLI code in context of a remote node"}].
+
+remote_cli(Config) when is_list(Config) ->
+    Socket = spawn_node(),
+    %% execute CLI in that node
+    %% check that request was executed in this node, but
+    %%  channeled through another node
+    Slaves = rpc(Socket, cli, run, [[node(), ["node"], #{}]]),
+    ct:pal("Slave returned: ~p", [Slaves]),
+    ?assertEqual(node(), Slaves),
+    gen_tcp:close(Socket),
+    net_kernel:stop().
