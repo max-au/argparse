@@ -14,7 +14,10 @@
 %% Test server callbacks
 -export([
     suite/0,
-    all/0
+    all/0,
+    groups/0,
+    init_per_group/2,
+    end_per_group/2
 ]).
 
 %% Test cases
@@ -36,8 +39,7 @@
     cli/0,
     cli/1,
     cos/1,
-    mul/2,
-    start_server/1
+    mul/2
 ]).
 
 -export([log/2]).
@@ -48,9 +50,28 @@ suite() ->
     [{timetrap, {seconds, 5}}].
 
 all() ->
-    [test_cli, auto_help, subcmd_help, missing_handler, bare_cli,
-        multi_module, warnings, malformed_behaviour,
-        remote_cli].
+    [{group, sequence, local}, {group, parallel, remote}].
+
+groups() ->
+    [{local, [test_cli, auto_help, subcmd_help, missing_handler, bare_cli,
+        multi_module, warnings, malformed_behaviour]}, {remote, [remote_cli]}].
+
+init_per_group(remote, Config) ->
+    case is_alive() of
+        true ->
+            Config;
+        false ->
+            {ok, NetKernel} = net_kernel:start([?MODULE, shortnames]),
+            [{net_kernel, NetKernel} | Config]
+    end;
+init_per_group(_, Config) ->
+    Config.
+
+end_per_group(remote, Config) ->
+    net_kernel:stop(),
+    proplists:delete(net_kernel, Config);
+end_per_group(_, Config) ->
+    Config.
 
 %%--------------------------------------------------------------------
 %% Helpers
@@ -164,6 +185,9 @@ cli() ->
                     #{name => left, type => int},
                     #{name => right, type => int}
                 ]
+            },
+            "node" => #{
+                handler => fun (_) -> io:format("~s~n", [node()]) end
             }
         }
     }.
@@ -344,12 +368,17 @@ remote_cli() ->
     [{doc, "Executes CLI code in context of a remote node"}].
 
 remote_cli(Config) when is_list(Config) ->
-    Socket = spawn_node(),
-    %% execute CLI in that node
-    %% check that request was executed in this node, but
-    %%  channeled through another node
-    Slaves = rpc(Socket, cli, run, [[node(), ["node"], #{}]]),
-    ct:pal("Slave returned: ~p", [Slaves]),
-    ?assertEqual(node(), Slaves),
-    gen_tcp:close(Socket),
-    net_kernel:stop().
+    Escript = filename:join(proplists:get_value(priv_dir, Config), "cli.escript"),
+    %% Args, keep in sync with "rebar.config", XXX: read rebar.config,
+    %%  or even better use "rebar3 escriptize" in this test case
+    EmuArgs = "+S 1:1 -noinput -hidden -noshell -dist_listen false -connect_all false -sname undefined",
+    %% create escript on the fly (pack "argparse + cli")
+    Beams = [
+        begin
+            {ok, Bin} = file:read_file(code:which(Mod)),
+            {lists:concat([Mod, ".beam"]), Bin}
+        end || Mod <- [argparse, cli]],
+    ok = escript:create(Escript, [shebang, comment, {emu_args, EmuArgs}, {archive, Beams, []}]),
+    %% call ourselves via escript
+    Out = os:cmd("escript " ++ Escript ++ " -n " ++ atom_to_list(node()) ++ " node"),
+    ?assertEqual(lists:concat([node(), "\n"]), Out).

@@ -41,8 +41,12 @@
 
 -export([
     run/1,
-    run/2,
-    run/4
+    run/2
+]).
+
+%% escript export
+-export([
+    main/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -93,19 +97,29 @@ run(Args, Options) ->
     CmdMap = discover_commands(Modules, Options),
     dispatch(Args, CmdMap, Modules, Options).
 
--type scope() :: term().
-
--spec run(node(), scope(), [string()], run_options()) -> term() | {badrpc, term()}.
-run(Node, _Scope, Args, Options) when is_atom(Node), is_list(Args), is_map(Options) ->
-    %% connect to a remote node - using hidden connection and
-    %%  dynamically obtained node name
-    case net_kernel:connect_node(Node) of
-        true ->
-            %% other node may not have CLI framework at all
-            rpc:call(Node, cli, run, [Args, Options]);
-        false ->
-            io:format("Unable to connect to ~s~n", [Node]),
-            {'EXIT', noconnection}
+%% @doc CLI entry point for escript invocation
+-spec main([string()]) -> term() | {badrpc, term()}.
+main(Args) ->
+    Parser = #{arguments => [
+        #{name => node, short => $n, type => {atom, unsafe}, help => "Remote node name"},
+        #{name => args, nargs => all}]},
+    try argparse:parse(Args, Parser, #{progname => "cli"}) of
+        #{node := Node, args := Pass} ->
+            remote_cli(Node, Pass);
+        #{args := Pass} ->
+            %% detect a node to go to, XXX: implement
+            remote_cli(node(), Pass)
+    catch
+        error:{argparse, Reason} ->
+            %% see if it was cry for help that triggered error message
+            case help_requested(Reason, "-") of
+                false ->
+                    Fmt = argparse:format_error(Reason, Parser, #{progname => "cli"}),
+                    io:format("error: ~s", [Fmt]);
+                CmdPath ->
+                    Fmt = argparse:help(Parser, #{command => tl(CmdPath), progname => "cli"}),
+                    io:format("~s", [Fmt])
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -333,3 +347,15 @@ collect_arguments(Command, [H|Tail], Acc) ->
     Args = maps:get(arguments, Command, []),
     Next = maps:get(H, maps:get(commands, Command, H)),
     collect_arguments(Next, Tail, Acc ++ Args).
+
+remote_cli(Node, Args) ->
+    %% connect to a remote node - using hidden connection and
+    %%  dynamically obtained node name
+    case net_kernel:connect_node(Node) of
+    true ->
+        %% other node may not have CLI framework at all
+        rpc:call(Node, cli, run, [Args]);
+    false ->
+        io:format("Unable to connect to ~s~n", [Node]),
+        {'EXIT', noconnection}
+    end.
