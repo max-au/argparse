@@ -317,17 +317,39 @@ format_error(Reason, Command, Options) ->
 %%--------------------------------------------------------------------
 %% Parser implementation
 
+%% helper function to match either a long form of "--arg=value", or just "--arg"
+match_long(Arg, LongOpts) ->
+    case maps:find(Arg, LongOpts) of
+        {ok, Option} ->
+            {ok, Option};
+        error ->
+            %% see if there is '=' equals sign in the Arg
+            case string:split(Arg, "=") of
+                [MaybeLong, Value] ->
+                    case maps:find(MaybeLong, LongOpts) of
+                        {ok, Option} ->
+                            {ok, Option, Value};
+                        error ->
+                            nomatch
+                    end;
+                _ ->
+                    nomatch
+            end
+    end.
+
 %% parse_impl implements entire internal parse logic.
 
-%% Claus: option starting with any prefix
+%% Clause: option starting with any prefix
 %% No separate clause for single-character short form, because there could be a single-character
 %%  long form taking precedence.
 parse_impl([[Prefix | Name] | Tail], #eos{prefixes = Pref} = Eos) when is_map_key(Prefix, Pref) ->
     %% match "long" option from the list of currently known
-    case maps:find(Name, Eos#eos.long) of
+    case match_long(Name, Eos#eos.long) of
         {ok, Option} ->
             consume(Tail, Option, Eos);
-        error ->
+        {ok, Option, Value} ->
+            consume([Value | Tail], Option, Eos);
+        nomatch ->
             %% try to match single-character flag
             case Name of
                 [Flag] when is_map_key(Flag, Eos#eos.short) ->
