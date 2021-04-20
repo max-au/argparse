@@ -114,7 +114,7 @@ character is automatically prepended to long forms, so for this example:
 ```erlang
     #{name => myarg, short => $m, long => "-myarg"}
 ```
-Argument ```myarg``` can be specified as ```-m``` or as ```--myarg```. Please not that it
+Argument ```myarg``` can be specified as ```-m``` or as ```--myarg```. Please note that it
 is possible to have long forms with a single prefix character:
 ```erlang
     #{name => kernel, long => "kernel"}
@@ -122,6 +122,12 @@ is possible to have long forms with a single prefix character:
 By default, optional arguments are not required and may be omitted from command line.
 Positional arguments are required. It is possible to override this behaviour by
 setting **required** field.
+
+It is supported to specify long-form value using this syntax:
+```shell
+    mycli --arg=value
+```
+It is treated the same way as `mycli --arg value`.
 
 For every argument matched, parser may consume several following positional arguments
 (not starting with a prefix). Analysis is based on **nargs**, **action** and **type** fields.

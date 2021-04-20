@@ -10,6 +10,7 @@
 
 -export([
     basic/0, basic/1,
+    long_form_eq/0, long_form_eq/1,
     single_arg_built_in_types/0, single_arg_built_in_types/1,
     complex_command/0, complex_command/1,
     errors/0, errors/1,
@@ -39,7 +40,8 @@ suite() ->
 
 groups() ->
     [{parallel, [parallel], [
-        basic, single_arg_built_in_types, complex_command, errors, args, argparse, negative,
+        basic, long_form_eq, single_arg_built_in_types, complex_command, errors,
+        args, argparse, negative,
         nodigits,  python_issue_15112, type_validators, subcommand, error_format,
         very_short, multi_short, usage, readme, error_usage, meta, usage_template
     ]}].
@@ -178,6 +180,17 @@ basic(Config) when is_list(Config) ->
     ArgList = #{name => arg, nargs => 2, type => boolean},
     ?assertEqual(#{arg => [true, false]},
         parse(["true false"], #{arguments => [ArgList]})).
+
+long_form_eq() ->
+    [{doc, "Tests that long form supports --arg=value"}].
+
+long_form_eq(Config) when is_list(Config) ->
+    %% cmd --arg=value
+    PosOptCmd = #{arguments => [#{name => arg, long => "-arg"}]},
+    ?assertEqual({#{arg => "value"}, {["cmd"], PosOptCmd}},
+        parse(["cmd --arg=value"], #{commands => #{"cmd" => PosOptCmd}})),
+    %% --int=10
+    ?assertEqual(#{int => 10}, parse(["--int=10"], #{arguments => [#{name => int, type => int, long => "-int"}]})).
 
 single_arg_built_in_types() ->
     [{doc, "Tests all built-in types supplied as a single argument"}].

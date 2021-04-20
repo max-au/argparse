@@ -159,9 +159,10 @@ rebar3.
     {deps, [argparse]}.
 ```
 
-## Known incompatibilities:
-  * boolean flag (option), automatically using {store, true}
-  * all positional arguments are required by default (even 'maybe')
+## Known incompatibilities
+In comparison with Python implementation, `argparse` for Erlang:
+  * boolean flag (option) automatically uses {store, true}
+  * all positional arguments are required by default (even when nargs is 'maybe')
   * first-class (sub) commands, slightly differently from argparse
   * implicit --help/-h is not a part of argparse (but implemented in cli)
 
@@ -170,7 +171,7 @@ over a positional argument.
 Commands form exclusive groups, e.g. only one command can
 be followed at a time.
 
-Kinds of arguments supported:
+## Supported command line syntax
  * command (priority positional argument) : ectl {crawler|reader|writer}
  * command, and sub-command:                ectl crawler {start|stop|check}
  * positional argument (required):          ectl <arg1> <arg2>
@@ -183,20 +184,23 @@ Kinds of arguments supported:
  * long option flag:          ectl [--foo]
  * long optional argument:    ectl [--foo <arg>]
  * required long:             ectl --foo <arg>
+ * long, arg=value form:      ectl --foo=arg
  * list of arguments:         ectl <arg>, ...
 
 ## Expected features
 
-To be considered after 1.0.0:
+To be considered after 1.1.2:
 * search for commands and arguments (mini-man)
 * abbreviated long forms
 * mutual exclusion groups
 * handler hooks (global options support)
 * shell auto-complete
-* support for "--arg=value" form
 * automatically generated negative boolean long forms "--no-XXXX"
 
 ## Changelog
+
+Version 1.1.2:
+ * support for "--arg=value" form
 
 Version 1.1.1:
  * added templates for help text
