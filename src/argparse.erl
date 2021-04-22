@@ -373,10 +373,10 @@ parse_impl([[Prefix | Name] | Tail], #eos{prefixes = Pref} = Eos) when is_map_ke
                             %% found a negative number
                             parse_positional([Prefix|Name], Tail, Eos);
                         false ->
-                            fail({unknown_argument, Eos#eos.commands, [Prefix|Name]})
+                            catch_all_positional([[Prefix|Name] | Tail], Eos)
                     end;
                 _Unknown ->
-                    fail({unknown_argument, Eos#eos.commands, [Prefix|Name]})
+                    catch_all_positional([[Prefix|Name] | Tail], Eos)
             end
     end;
 
@@ -402,7 +402,7 @@ parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, po
     %% error if stopped at sub-command with no handler
     map_size(maps:get(commands, Current, #{})) >0 andalso
         (not is_map_key(handler, Current)) andalso
-        fail({missing_argument, Commands, ""}),
+        fail({missing_argument, Commands, "missing handler"}),
     %% go over remaining positional, verify they are all not required
     ArgMap1 = fold_args_map(Commands, true, ArgMap0, Pos),
     %% go over optionals, and either raise an error, or set default
@@ -444,6 +444,11 @@ fold_args_map(Commands, Req, ArgMap, Args) ->
 
 %%--------------------------------------------------------------------
 %% argument consumption (nargs) handling
+
+catch_all_positional(Tail, #eos{pos = [#{nargs := all} = Opt]} = Eos) ->
+    action([], Tail, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
+catch_all_positional([Arg | _Tail], Eos) ->
+    fail({unknown_argument, Eos#eos.commands, Arg}).
 
 parse_positional(Arg, _Tail, #eos{pos = [], commands = Commands}) ->
     fail({unknown_argument, Commands, Arg});
