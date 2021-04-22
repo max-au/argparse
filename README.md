@@ -189,15 +189,16 @@ be followed at a time.
 
 ## Expected features
 
-To be considered after 1.1.2:
+To be considered after 1.1.3:
 * search for commands and arguments (mini-man)
 * abbreviated long forms
 * mutual exclusion groups
-* handler hooks (global options support)
 * shell auto-complete
 * automatically generated negative boolean long forms "--no-XXXX"
 
 ## Changelog
+Version 1.1.3:
+* fixed bug causing `nargs => all` to be ignored
 
 Version 1.1.2:
  * support for "--arg=value" form

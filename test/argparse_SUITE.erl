@@ -24,6 +24,7 @@
     subcommand/0, subcommand/1,
     very_short/0, very_short/1,
     multi_short/0, multi_short/1,
+    proxy_arguments/0, proxy_arguments/1,
     usage/0, usage/1,
     readme/0, readme/1,
     error_usage/0, error_usage/1,
@@ -41,7 +42,7 @@ suite() ->
 groups() ->
     [{parallel, [parallel], [
         basic, long_form_eq, single_arg_built_in_types, complex_command, errors,
-        args, argparse, negative,
+        args, argparse, negative, proxy_arguments,
         nodigits,  python_issue_15112, type_validators, subcommand, error_format,
         very_short, multi_short, usage, readme, error_usage, meta, usage_template
     ]}].
@@ -559,7 +560,7 @@ subcommand(Config) when is_list(Config) ->
         {#{force => true, baz => "N1O1O", foo => true, bar => "bar"}, {["one", "two"], TwoCmd}},
         parse("one N1O1O -f two --foo bar", Cmd)),
     %% it is an error not to choose subcommand
-    ?assertException(error, {argparse, {missing_argument,_,[]}},
+    ?assertException(error, {argparse, {missing_argument,_,"missing handler"}},
         parse("one N1O1O -f", Cmd)).
 
 error_format() ->
@@ -624,6 +625,35 @@ multi_short(Config) when is_list(Config) ->
             #{name => force, short => $f, type => boolean},
             #{name => path}
             ]})).
+
+proxy_arguments() ->
+    [{doc, "Tests nargs => all used to proxy arguments to another script"}].
+
+proxy_arguments(Config) when is_list(Config) ->
+    Cmd = #{
+        commands => #{
+            "start" => #{
+                arguments => [
+                    #{name => shell, short => $s, long => "-shell", type => boolean},
+                    #{name => skip, short => $x, long => "-skip", type => boolean},
+                    #{name => args, required => false, nargs => all}
+                ]
+            },
+            "stop" => #{}
+        },
+        arguments => [
+            #{name => node}
+        ],
+        handler => fun (#{}) -> ok end
+    },
+    ?assertEqual(#{node => "node1"}, parse("node1", Cmd)),
+    ?assertEqual({#{node => "node1"}, {["stop"], #{}}}, parse("node1 stop", Cmd)),
+    ?assertMatch({#{node := "node2.org", shell := true, skip := true}, _}, parse("node2.org start -x -s", Cmd)),
+    ?assertMatch({#{args := ["-app","key","value"],node := "node1.org"}, {["start"], _}},
+        parse("node1.org start -app key value", Cmd)),
+    ?assertMatch({#{args := ["-app","key","value", "-app2", "key2", "value2"],node := "node3.org", shell := true}, {["start"], _}},
+        parse("node3.org start -s -app key value -app2 key2 value2", Cmd)).
+
 
 usage() ->
     [{doc, "Tests help formatter"}].
