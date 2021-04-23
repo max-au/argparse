@@ -1,6 +1,8 @@
 #!/usr/bin/env escript
 
 %% calculator, demonstrating sub-commands, and handler specifications
+%% how to run from:
+%% ERL_FLAGS="-pa ../../../_build/default/lib/argparse/ebin" ./calc mul 2 2
 
 -behaviour(cli).
 -mode(compile).

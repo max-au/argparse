@@ -1,0 +1,30 @@
+#!/usr/bin/env escript
+
+%% mixed commands and sub-commands
+%% examples to try:
+%%   ERL_FLAGS="-pa ../../../_build/default/lib/argparse/ebin" escript mixed start name
+
+-behaviour(cli).
+-mode(compile).
+-export([cli/0]).
+
+main(Args) ->
+    Out = cli:run(Args, #{progname => "mixed"}),
+    Out =/= ok andalso io:format("~p~n", [Out]).
+
+cli() ->
+    #{
+        commands => #{
+            "start" => #{
+                handler => fun (#{node := Node}) -> net_kernel:start([Node, shortnames]), node() end,
+                help => "start distribution dynamically"
+            },
+            "node" => #{
+                handler => fun (#{}) -> node() end,
+                help => "name of this node"
+            }
+        },
+        arguments => [
+            #{name => node, required => false, type => {atom, unsafe}, help => "node name to start"}
+        ]
+    }.

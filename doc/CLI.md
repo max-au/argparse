@@ -4,6 +4,12 @@ to a system exporting several hundred commands.
 
 ## Basic [example](examples/escript/simple)
 
+Ensure `argparse` is in your code path when running examples.
+```shell
+    cd doc/examples/escript
+    ERL_FLAGS="-pa ../../../_build/default/lib/argparse/ebin" ./calc mul 2 2
+```
+
 Implementing a utility with a single command to run requires:
 1. Compiled code (as evaluated code does not work with callbacks)
 2. 'cli' behaviour declared

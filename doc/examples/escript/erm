@@ -1,6 +1,8 @@
 #!/usr/bin/env escript
 
 %% argparse example, without cli behaviour used
+%% how to try:
+%%  ERL_FLAGS="-pa ../../../_build/default/lib/argparse/ebin" ./erm -rf dir
 
 main(Args) ->
     #{force := Force, recursive := Recursive, dir := Dir} =
