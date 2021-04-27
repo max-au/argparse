@@ -214,22 +214,22 @@ auto_help(Config) when is_list(Config) ->
         modules => [?MODULE, auto_help]}) end)),
     %% request help for a subcommand
     Expected2 = "usage: erl math {cos|extra|sin} <in>\n\nSubcommands:\n  cos   "
-        "Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value, float\n",
+        "Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected2}, capture_output(fun () -> cli:run(["math", "--help"],
         #{modules => [?MODULE]}) end)),
     %% request help for a sub-subcommand
     Expected3 = "usage: erl math extra {fail|ok} <in>\n\nSubcommands:\n  fail \n"
-        "  ok   \n\nArguments:\n  in Input value, float\n",
+        "  ok   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected3}, capture_output(fun () -> cli:run(["math", "extra", "--help"],
         #{modules => ?MODULE}) end)),
     %% request help for a sub-sub-subcommand
-    Expected4 = "usage: erl math cos <in>\n\nArguments:\n  in Input value, float\n",
+    Expected4 = "usage: erl math cos <in>\n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected4}, capture_output(fun () -> cli:run(["math", "cos", "--help"],
         #{modules => ?MODULE}) end)),
     %% request help in a really wrong way (subcommand does not exist)
     Expected5 =
         "error: erl math: invalid argument bad for: in\nusage: erl math {cos|extra|sin} <in>\n\nSubcommands:\n"
-        "  cos   Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value, float\n",
+        "  cos   Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected5}, capture_output(fun () -> cli:run(["math", "bad", "--help"],
         #{modules => ?MODULE}) end)).
 

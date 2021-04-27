@@ -198,7 +198,9 @@ To be considered after 1.1.3:
 
 ## Changelog
 Version 1.1.3:
-* fixed bug causing `nargs => all` to be ignored
+ * added `help => hidden` for commands and options
+ * changed default formatting for better readability
+ * fixed bug causing `nargs => all` to be ignored
 
 Version 1.1.2:
  * support for "--arg=value" form

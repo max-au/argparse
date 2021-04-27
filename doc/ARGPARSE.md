@@ -58,7 +58,7 @@ name, and a sub-spec passed for this command:
 Command specification may contain following fields:
   * **commands** - sub-commands, name to nested command spec
   * **arguments** - list of argument specifications
-  * **help** - string to generate usage information
+  * **help** - string to generate usage information, can be set to `hidden`, causing this command to be omitted in usage output
   * **handler** - function expected to process this command, or *optional* atom
   * user-defined fields
 
@@ -203,6 +203,8 @@ To get human-readable representation:
 ```
 
 ## Help templates
+
+To completely hide the argument or command from the output, supply `help => hidden`.
 
 It is possible to override help text generated for arguments. By default,
 options are formatted with "help text, type, default", e.g.:
