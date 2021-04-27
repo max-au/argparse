@@ -87,7 +87,7 @@ ubiq_cmd() ->
                 arguments => [
                     #{name => server, help => "server to start"},
                     #{name => shard, short => $s, type => int, nargs => nonempty_list, help => "initial shards"},
-                    #{name => part, short => $p, type => int, nargs => list, help => "some parts"},
+                    #{name => part, short => $p, type => int, nargs => list, help => hidden},
                     #{name => z, short => $z, type => {int, [{min, 1}, {max, 10}]}, help => "between"},
                     #{name => l, short => $l, type => {int, [{max, 10}]}, nargs => maybe, help => "maybe lower"},
                     #{name => more, short => $m, type => {int, [{max, 10}]}, help => "less than 10"},
@@ -100,7 +100,7 @@ ubiq_cmd() ->
                     #{name => u, short => $u, type => {string, ["1", "2"]}, help => "string choices"},
                     #{name => choice, short => $c, type => {int, [1,2,3]}, help => "tough choice"},
                     #{name => fc, short => $q, type => {float, [2.1,1.2]}, help => "floating choice"},
-                    #{name => name, required => false, nargs => list, help => "extra name to pass"},
+                    #{name => name, required => false, nargs => list, help => hidden},
                     #{name => long, long => "foobar", required => false, help => "foobaring option"}
                 ], commands => #{
                     "crawler" => #{arguments => [
@@ -111,9 +111,13 @@ ubiq_cmd() ->
             },
             "stop" => #{help => "stops running server", arguments => []
             },
-            "status" => #{help => "prints server status", arguments => []
+            "status" => #{help => "prints server status", arguments => [],
+                commands => #{
+                    "crawler" => #{
+                        arguments => [#{name => extra, long => "--extra", help => "extra option very deep"}],
+                        help => "crawler status"}}
             },
-            "restart" => #{help => "restarts server specified", arguments => [
+            "restart" => #{help => hidden, arguments => [
                 #{name => server, help => "server to restart"},
                 #{name => duo, short => $d, long => "-duo", help => "dual option"}
             ]}
@@ -656,15 +660,27 @@ proxy_arguments(Config) when is_list(Config) ->
 
 
 usage() ->
-    [{doc, "Tests help formatter"}].
+    [{doc, "Basic tests for help formatter, including 'hidden' help"}].
 
-%% This test does not verify usage printed,
-%%  but at least ensures formatter does not crash.
 usage(Config) when is_list(Config) ->
     Cmd = ubiq_cmd(),
-    ct:pal("~s", [argparse:help(Cmd, #{command => ["start"]})]),
-    ct:pal("~s", [argparse:help(Cmd)]),
-    ct:pal("~s", [argparse:help(Cmd, #{command => ["start", "crawler"]})]),
+    Usage = "usage: erl start {crawler|doze} [-lrfv] [-s <shard>...] [-z <z>] [-m <more>] [-b <bin>] [-g <g>] [-t <t>] ---maybe-req [-y <y>]"
+        " --yyy <y> [-u <u>] [-c <choice>] [-q <fc>] [-foobar <long>] [--force] [-i <interval>] [--req <weird>] [--float <float>] <server> [<optpos>]"
+        "\n\nSubcommands:\n  crawler      controls crawler behaviour\n  doze         dozes a bit\n\nArguments:\n  server       server to start\n  optpos       optional positional (int)"
+        "\n\nOptional arguments:\n  -s           initial shards (int)\n  -z           between (1 < int < 10)\n  -l           maybe lower (int < 10)"
+        "\n  -m           less than 10 (int < 10)\n  -b           binary with re (binary re: m)\n  -g           binary with re (binary re: m)\n  -t           string with re (string re: m)"
+        "\n  ---maybe-req maybe required int (int)\n  -y, --yyy    string with re (string re: m)\n  -u           string choices (choice: 12)\n  -c           tough choice (choice: 1, 2, 3)"
+        "\n  -q           floating choice (choice: 2.10000, 1.20000)\n  -foobar      foobaring option\n  -r           recursive\n  -f, --force  force\n  -v           verbosity level"
+        "\n  -i           interval set (int > 1)\n  --req        required optional, right?\n  --float      floating-point long form argument (float, 3.14)\n",
+    ?assertEqual(Usage, argparse:help(Cmd, #{command => ["start"]})),
+    FullCmd = "usage: erl <command> [-rfv] [--force] [-i <interval>] [--req <weird>] [--float <float>]\n\nSubcommands:\n  start       verifies configuration and starts server"
+        "\n  status      prints server status\n  stop        stops running server\n\nOptional arguments:\n  -r          recursive\n  -f, --force force"
+        "\n  -v          verbosity level\n  -i          interval set (int > 1)\n  --req       required optional, right?\n  --float     floating-point long form argument (float, 3.14)\n",
+    ?assertEqual(FullCmd, argparse:help(Cmd)),
+    CrawlerStatus = "usage: erl status crawler [-rfv] [---extra <extra>] [--force] [-i <interval>] [--req <weird>] [--float <float>]\n\nOptional arguments:\n"
+        "  ---extra    extra option very deep\n  -r          recursive\n  -f, --force force\n  -v          verbosity level"
+        "\n  -i          interval set (int > 1)\n  --req       required optional, right?\n  --float     floating-point long form argument (float, 3.14)\n",
+    ?assertEqual(CrawlerStatus, argparse:help(Cmd, #{command => ["status", "crawler"]})),
     ok.
 
 error_usage() ->

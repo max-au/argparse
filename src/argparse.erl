@@ -87,7 +87,7 @@
 -type argument_help() :: {
     string(), %% short form, printed in command usage, e.g. "[--dir <dirname>]", developer is
               %%    responsible for proper formatting (e.g. adding <>, dots... and so on)
-    [string() | type | default]  %% long description, default is [help, ", ", type, ", ", default] -
+    [string() | type | default]  %% long description, default is [help, " (", type, ", ", default, ")"] -
                                  %%    "floating-point long form argument, float, [3.14]"
 }.
 
@@ -135,8 +135,8 @@
         nonempty_list |     %% consume at least one positional argument, until next optional
         all,                %% fold remaining command line into this argument
 
-    %% help string printed in usage
-    help => string() | argument_help()
+    %% help string printed in usage, hidden help is not printed at all
+    help => hidden | string() | argument_help()
 }.
 
 -type arg_map() :: #{term() => term()}. %% Arguments map: argument name to a term, produced by parser. Supplied to command handler
@@ -179,7 +179,7 @@
     arguments => [argument()],
 
     %% help line
-    help => string(),
+    help => hidden | string(),
 
     %% recommended handler function, cli behaviour deduces handler from
     %%  command name and module implementing cli behaviour
@@ -851,7 +851,7 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
         fail({invalid_command, clean_path(Path), commands, "command name must be a string, not starting with optional prefix"}),
     is_map(Cmd) orelse
         fail({invalid_command, clean_path(Path), commands, "command description must be a map"}),
-    is_list(maps:get(help, Cmd, [])) orelse
+    is_list(maps:get(help, Cmd, [])) orelse (maps:get(help, Cmd) =:= hidden) orelse
         fail({invalid_command, clean_path(Path), help, "help must be a string"}),
     is_map(maps:get(commands, Cmd, #{})) orelse
         fail({invalid_command, clean_path(Path), commands, "sub-commands must be a map"}),
@@ -911,7 +911,7 @@ validate_option(Path, #{name := Name} = Opt) when is_atom(Name) ->
     Unknown = maps:keys(maps:without([name, help, short, long, action, nargs, type, default, required], Opt)),
     Unknown =/= [] andalso fail({invalid_option, clean_path(Path), hd(Unknown), "unrecognised field"}),
     %% verify specific arguments
-    %% help: string or a tuple of {string(), ...}
+    %% help: string, 'hidden', or a tuple of {string(), ...}
     is_valid_option_help(maps:get(help, Opt, [])) orelse
         fail({invalid_option, clean_path(Path), Name, help, "must be a string or valid help template, ensure help template is a list"}),
     is_list(maps:get(long, Opt, [])) orelse
@@ -988,6 +988,8 @@ validate_args(_Nargs, Path, #{name := Name}) ->
 clean_path(Path) ->
     [Cmd || {Cmd, _} <- Path].
 
+is_valid_option_help(hidden) ->
+    true;
 is_valid_option_help(Help) when is_list(Help) ->
     true;
 is_valid_option_help({Short, Desc}) when is_list(Short), is_list(Desc) ->
@@ -1040,7 +1042,9 @@ format_help({RootCmd, Root}, Format) ->
     %% collect and format sub-commands
     Immediate = maps:get(commands, Cmd, #{}),
     {Long, Subs} = maps:fold(
-        fun (Name, Sub, {Long, SubAcc}) ->
+        fun (_Name, #{help := hidden}, {Long, SubAcc}) ->
+            {Long, SubAcc};
+            (Name, Sub, {Long, SubAcc}) ->
             Help = maps:get(help, Sub, ""),
             {max(Long, length(Name)), [{Name, Help}|SubAcc]}
         end, {Longest, []}, Immediate),
@@ -1091,6 +1095,8 @@ maybe_add(ToAdd, List) ->
 %%  long options, and positional arguments
 
 %% format optional argument
+format_opt_help(#{help := hidden}, Acc) ->
+    Acc;
 format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) when ?IS_OPTIONAL(Opt) ->
     Desc = format_description(Opt),
     %% does it need an argument? look for nargs and action
@@ -1165,10 +1171,17 @@ format_description(#{help := {_Short, Desc}} = Opt) ->
                 String
         end, Desc
     );
-%% default format
+%% default format: "desc", "desc (type)", "desc (default)", "desc (type, default)"
 format_description(#{name := Name} = Opt) ->
-    Desc = [maps:get(help, Opt, atom_to_list(Name)), format_type(Opt), format_default(Opt)],
-    lists:flatten(lists:join(", ", [D || D <- Desc, D =/= []])).
+    case {maps:get(help, Opt, atom_to_list(Name)), format_type(Opt), format_default(Opt)} of
+        {"", "", Type} -> Type;
+        {"", Default, ""} -> Default;
+        {Desc, "", ""} -> Desc;
+        {Desc, "", Default} -> Desc ++ " (" ++ Default ++ ")";
+        {Desc, Type, ""} -> Desc ++ " (" ++ Type ++ ")";
+        {"", Type, Default} -> Type ++ ", " ++ Default;
+        {Desc, Type, Default} -> Desc ++ " (" ++ Type ++ ", " ++ Default ++ ")"
+    end.
 
 %% option formatting helpers
 maybe_concat(No, []) -> No;
