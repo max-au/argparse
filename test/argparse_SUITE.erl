@@ -210,7 +210,8 @@ single_arg_built_in_types(Config) when is_list(Config) ->
     %% integer tests
     Int = #{arguments => [#{name => int, type => int, short => $i, long => "-int"}]},
     ?assertEqual(#{int => 1}, parse([" -i 1"], Int)),
-    ?assertException(error, {argparse,{invalid_argument,["erl"],int,"1,"}}, parse([" -i 1, 3"], Int)),
+    Prog = prog(),
+    ?assertException(error, {argparse,{invalid_argument,[Prog],int,"1,"}}, parse([" -i 1, 3"], Int)),
     ?assertEqual(#{int => 1}, parse(["--int 1"], Int)),
     ?assertEqual(#{int => -1}, parse(["-i -1"], Int)),
     %% floating point
@@ -664,7 +665,7 @@ usage() ->
 
 usage(Config) when is_list(Config) ->
     Cmd = ubiq_cmd(),
-    Usage = "usage: erl start {crawler|doze} [-lrfv] [-s <shard>...] [-z <z>] [-m <more>] [-b <bin>] [-g <g>] [-t <t>] ---maybe-req [-y <y>]"
+    Usage = "usage: " ++ prog() ++ " start {crawler|doze} [-lrfv] [-s <shard>...] [-z <z>] [-m <more>] [-b <bin>] [-g <g>] [-t <t>] ---maybe-req [-y <y>]"
         " --yyy <y> [-u <u>] [-c <choice>] [-q <fc>] [-foobar <long>] [--force] [-i <interval>] [--req <weird>] [--float <float>] <server> [<optpos>]"
         "\n\nSubcommands:\n  crawler      controls crawler behaviour\n  doze         dozes a bit\n\nArguments:\n  server       server to start\n  optpos       optional positional (int)"
         "\n\nOptional arguments:\n  -s           initial shards (int)\n  -z           between (1 < int < 10)\n  -l           maybe lower (int < 10)"
@@ -673,11 +674,11 @@ usage(Config) when is_list(Config) ->
         "\n  -q           floating choice (choice: 2.10000, 1.20000)\n  -foobar      foobaring option\n  -r           recursive\n  -f, --force  force\n  -v           verbosity level"
         "\n  -i           interval set (int > 1)\n  --req        required optional, right?\n  --float      floating-point long form argument (float, 3.14)\n",
     ?assertEqual(Usage, argparse:help(Cmd, #{command => ["start"]})),
-    FullCmd = "usage: erl <command> [-rfv] [--force] [-i <interval>] [--req <weird>] [--float <float>]\n\nSubcommands:\n  start       verifies configuration and starts server"
+    FullCmd = "usage: " ++ prog() ++ " <command> [-rfv] [--force] [-i <interval>] [--req <weird>] [--float <float>]\n\nSubcommands:\n  start       verifies configuration and starts server"
         "\n  status      prints server status\n  stop        stops running server\n\nOptional arguments:\n  -r          recursive\n  -f, --force force"
         "\n  -v          verbosity level\n  -i          interval set (int > 1)\n  --req       required optional, right?\n  --float     floating-point long form argument (float, 3.14)\n",
     ?assertEqual(FullCmd, argparse:help(Cmd)),
-    CrawlerStatus = "usage: erl status crawler [-rfv] [---extra <extra>] [--force] [-i <interval>] [--req <weird>] [--float <float>]\n\nOptional arguments:\n"
+    CrawlerStatus = "usage: " ++ prog() ++ " status crawler [-rfv] [---extra <extra>] [--force] [-i <interval>] [--req <weird>] [--float <float>]\n\nOptional arguments:\n"
         "  ---extra    extra option very deep\n  -r          recursive\n  -f, --force force\n  -v          verbosity level"
         "\n  -i          interval set (int > 1)\n  --req       required optional, right?\n  --float     floating-point long form argument (float, 3.14)\n",
     ?assertEqual(CrawlerStatus, argparse:help(Cmd, #{command => ["status", "crawler"]})),
@@ -726,7 +727,7 @@ usage_template(Config) when is_list(Config) ->
         default => 0,
         help => {"[-s SHARD]", ["initial number, ", type, " with a default value of ", default]}}
     ]},
-    ?assertEqual("usage: erl [-s SHARD]\n\nArguments:\n  shard initial number, int with a default value of 0\n",
+    ?assertEqual("usage: " ++ prog() ++ " [-s SHARD]\n\nArguments:\n  shard initial number, int with a default value of 0\n",
         argparse:help(Cmd, #{})),
     %% Optional
     Cmd1 = #{arguments => [#{
@@ -736,7 +737,7 @@ usage_template(Config) when is_list(Config) ->
         default => 0,
         help => {"[-s SHARD]", ["initial number"]}}
     ]},
-    ?assertEqual("usage: erl [-s SHARD]\n\nOptional arguments:\n  -s initial number\n",
+    ?assertEqual("usage: " ++ prog() ++ " [-s SHARD]\n\nOptional arguments:\n  -s initial number\n",
         argparse:help(Cmd1, #{})),
     %% ISO Date example
     DefaultRange = {{2020, 1, 1}, {2020, 6, 22}},
@@ -755,6 +756,6 @@ usage_template(Config) when is_list(Config) ->
             }
         ]
     },
-    ?assertEqual("usage: erl [--range RNG]\n\nOptional arguments:\n  -r, --range date range, 2020-1-1..2020-6-22\n",
+    ?assertEqual("usage: " ++ prog() ++ " [--range RNG]\n\nOptional arguments:\n  -r, --range date range, 2020-1-1..2020-6-22\n",
         argparse:help(CmdISO, #{})),
     ok.

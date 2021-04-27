@@ -50,6 +50,9 @@ all() ->
 
 %%--------------------------------------------------------------------
 %% Helpers
+prog() ->
+    {ok, [[Prog]]} = init:get_argument(progname),
+    Prog.
 
 %% OTP logger redirection
 
@@ -213,22 +216,22 @@ auto_help(Config) when is_list(Config) ->
     ?assertEqual({ok, Expected1}, capture_output(fun () -> cli:run(["-h"], #{progname => "erm",
         modules => [?MODULE, auto_help]}) end)),
     %% request help for a subcommand
-    Expected2 = "usage: erl math {cos|extra|sin} <in>\n\nSubcommands:\n  cos   "
+    Expected2 = "usage: " ++ prog() ++ " math {cos|extra|sin} <in>\n\nSubcommands:\n  cos   "
         "Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected2}, capture_output(fun () -> cli:run(["math", "--help"],
         #{modules => [?MODULE]}) end)),
     %% request help for a sub-subcommand
-    Expected3 = "usage: erl math extra {fail|ok} <in>\n\nSubcommands:\n  fail \n"
+    Expected3 = "usage: " ++ prog() ++ " math extra {fail|ok} <in>\n\nSubcommands:\n  fail \n"
         "  ok   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected3}, capture_output(fun () -> cli:run(["math", "extra", "--help"],
         #{modules => ?MODULE}) end)),
     %% request help for a sub-sub-subcommand
-    Expected4 = "usage: erl math cos <in>\n\nArguments:\n  in Input value (float)\n",
+    Expected4 = "usage: " ++ prog() ++ " math cos <in>\n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected4}, capture_output(fun () -> cli:run(["math", "cos", "--help"],
         #{modules => ?MODULE}) end)),
     %% request help in a really wrong way (subcommand does not exist)
     Expected5 =
-        "error: erl math: invalid argument bad for: in\nusage: erl math {cos|extra|sin} <in>\n\nSubcommands:\n"
+        "error: " ++ prog() ++ " math: invalid argument bad for: in\nusage: " ++ prog() ++ " math {cos|extra|sin} <in>\n\nSubcommands:\n"
         "  cos   Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected5}, capture_output(fun () -> cli:run(["math", "bad", "--help"],
         #{modules => ?MODULE}) end)).
@@ -241,13 +244,13 @@ subcmd_help(Config) when is_list(Config) ->
     cli_module(empty, CliRet, undefined, []),
     %% capture good help output
     {_Ret, IO} = capture_output(fun () -> cli:run(["foo", "--help"], #{modules => empty}) end),
-    ?assertEqual("usage: erl foo <left>\n\nArguments:\n  left lefty\n", IO),
+    ?assertEqual("usage: " ++ prog() ++ " foo <left>\n\nArguments:\n  left lefty\n", IO),
     %% capture global help output
     {_Ret1, IO1} = capture_output(fun () -> cli:run(["--help"], #{modules => empty}) end),
-    ?assertEqual("usage: erl  {foo}\n\nSubcommands:\n  foo myfoo\n", IO1),
+    ?assertEqual("usage: " ++ prog() ++ "  {foo}\n\nSubcommands:\n  foo myfoo\n", IO1),
     %% capture broken help output
     {_Ret2, IO2} = capture_output(fun () -> cli:run(["mycool", "--help"], #{modules => [empty]}) end),
-    ?assertEqual("error: erl: unrecognised argument: mycool\nusage: erl  {foo}\n\nSubcommands:\n  foo myfoo\n", IO2),
+    ?assertEqual("error: " ++ prog() ++ ": unrecognised argument: mycool\nusage: " ++ prog() ++ "  {foo}\n\nSubcommands:\n  foo myfoo\n", IO2),
     ct:pal("~s", [IO]).
 
 missing_handler() ->
@@ -328,7 +331,7 @@ malformed_behaviour(Config) when is_list(Config) ->
     FunExport = "cli/1", FunDefs = "cli(#{arg := Args}) -> lists:sum(Args).",
     cli_module(malformed, CliRet, FunExport, [FunDefs]),
     {ok, IO, Log} = capture_output_and_log(fun () -> cli:run(["4"], #{modules => malformed}) end),
-    ?assertEqual("error: erl: unrecognised argument: 4\nusage: erl\n", IO),
+    ?assertEqual("error: " ++ prog() ++ ": unrecognised argument: 4\nusage: " ++ prog() ++ "\n", IO),
     [#{level := Lvl, msg := {Fmt, _Args}}] = Log,
     ?assertEqual("Error calling ~s:cli(): ~s:~p~n~p", Fmt),
     ?assertEqual(warning, Lvl).
