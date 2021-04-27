@@ -447,6 +447,13 @@ fold_args_map(Commands, Req, ArgMap, Args) ->
 
 catch_all_positional(Tail, #eos{pos = [#{nargs := all} = Opt]} = Eos) ->
     action([], Tail, Opt#{type => {list, maps:get(type, Opt, string)}}, Eos);
+%% it is possible that some positional arguments are not required,
+%%  and therefore it is possible to catch all skipping those
+catch_all_positional(Tail, #eos{argmap = Args, pos = [#{name := Name, default := Default, required := false} | Pos]} = Eos) ->
+    catch_all_positional(Tail, Eos#eos{argmap = Args#{Name => Default}, pos = Pos});
+%% same as above, but no default specified
+catch_all_positional(Tail, #eos{pos = [#{required := false} | Pos]} = Eos) ->
+    catch_all_positional(Tail, Eos#eos{pos = Pos});
 catch_all_positional([Arg | _Tail], Eos) ->
     fail({unknown_argument, Eos#eos.commands, Arg}).
 

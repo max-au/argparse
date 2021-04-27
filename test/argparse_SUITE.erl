@@ -644,7 +644,17 @@ proxy_arguments(Config) when is_list(Config) ->
                     #{name => args, required => false, nargs => all}
                 ]
             },
-            "stop" => #{}
+            "stop" => #{},
+            "status" => #{
+                arguments => [
+                    #{name => skip, required => false, default => "ok"},
+                    #{name => args, required => false, nargs => all}
+                ]},
+            "state" => #{
+                arguments => [
+                    #{name => skip, required => false},
+                    #{name => args, required => false, nargs => all}
+                ]}
         },
         arguments => [
             #{name => node}
@@ -657,7 +667,10 @@ proxy_arguments(Config) when is_list(Config) ->
     ?assertMatch({#{args := ["-app","key","value"],node := "node1.org"}, {["start"], _}},
         parse("node1.org start -app key value", Cmd)),
     ?assertMatch({#{args := ["-app","key","value", "-app2", "key2", "value2"],node := "node3.org", shell := true}, {["start"], _}},
-        parse("node3.org start -s -app key value -app2 key2 value2", Cmd)).
+        parse("node3.org start -s -app key value -app2 key2 value2", Cmd)),
+    %% test that any non-required positionals are skipped
+    ?assertMatch({#{args := ["-a","bcd"], node := "node2.org", skip := "ok"}, _}, parse("node2.org status -a bcd", Cmd)),
+    ?assertMatch({#{args := ["-app", "key"], node := "node2.org"}, _}, parse("node2.org state -app key", Cmd)).
 
 
 usage() ->
