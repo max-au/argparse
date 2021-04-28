@@ -109,7 +109,7 @@
     long => string(),
 
     %% throws an error if value is not present in command line
-    required => true,
+    required => boolean(),
 
     %% default value, produced if value is not present in command line
     default => term(),
