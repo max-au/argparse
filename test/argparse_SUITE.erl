@@ -415,7 +415,7 @@ args(Config) when is_list(Config) ->
     %%
     OptMaybe = [
         #{name => foo, long => "-foo", nargs => {maybe, c}, default => d},
-        #{name => bar, nargs => maybe, default => d}
+        #{name => bar, nargs => maybe, required => false, default => d}
     ],
     ?assertEqual(#{foo => "YY", bar => "XX"},
         parse_opts(["XX --foo YY"], OptMaybe)),
@@ -645,11 +645,13 @@ proxy_arguments(Config) when is_list(Config) ->
                 ]
             },
             "stop" => #{},
+            %% this verifies that "skip" is added to argmap even when not specified
             "status" => #{
                 arguments => [
                     #{name => skip, required => false, default => "ok"},
                     #{name => args, required => false, nargs => all}
                 ]},
+            %% this verifies that "skip" is not added to argmap
             "state" => #{
                 arguments => [
                     #{name => skip, required => false},
@@ -670,7 +672,9 @@ proxy_arguments(Config) when is_list(Config) ->
         parse("node3.org start -s -app key value -app2 key2 value2", Cmd)),
     %% test that any non-required positionals are skipped
     ?assertMatch({#{args := ["-a","bcd"], node := "node2.org", skip := "ok"}, _}, parse("node2.org status -a bcd", Cmd)),
-    ?assertMatch({#{args := ["-app", "key"], node := "node2.org"}, _}, parse("node2.org state -app key", Cmd)).
+    ParsedState = parse("node2.org state -app key", Cmd),
+    ?assertMatch({#{args := ["-app", "key"], node := "node2.org"}, _}, ParsedState),
+    ?assertNot(is_map_key(skip, element(1, ParsedState))).
 
 
 usage() ->

@@ -420,25 +420,27 @@ parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, po
 
 %% Generate error for missing required argument, and supply defaults for
 %%  missing optional arguments that have defaults.
+%% Parser rules:
+%%  - positional arguments are required unless explicitly told required => false
+%%  - optional arguments are required only when required => true
+%%  - if there is a default, and argument is not required, default is added to argmap when missing
+%%  - if there is no default, and argument is not required, argmap left as is
 fold_args_map(Commands, Req, ArgMap, Args) ->
     lists:foldl(
-        fun (#{name := Name} = Opt, Acc) when is_map_key(Name, Acc); map_get(required, Opt) =:= false ->
-                %% argument present, or explicitly not required
+        fun (#{name := Name}, Acc) when is_map_key(Name, Acc) ->
+                %% argument present
                 Acc;
             (#{name := Name, required := true}, _Acc) ->
                 %% missing, and required explicitly
                 fail({missing_argument, Commands, Name});
-            (#{name := Name, default := Default}, Acc) when Req =:= true ->
-                %% positional argument with default
-                Acc#{Name => Default};
-            (#{name := Name}, _Acc) when Req =:= true ->
-                %% missing, for positional argument, implicitly required
+            (#{name := Name} = Opt, _Acc) when Req =:= true, not is_map_key(required, Opt)->
+                %% missing, and required implicitly
                 fail({missing_argument, Commands, Name});
             (#{name := Name, default := Default}, Acc) ->
-                %% missing, optional, and there is a default
+                %% missing, and there is a default
                 Acc#{Name => Default};
             (_Opt, Acc) ->
-                %% missing, optional, no default - don't populate
+                %% missing and there is no default
                 Acc
         end, ArgMap, Args).
 
