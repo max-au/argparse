@@ -197,6 +197,9 @@ To be considered after 1.1.3:
 * automatically generated negative boolean long forms "--no-XXXX"
 
 ## Changelog
+Versoin 1.1.4:
+ * minor bugfixes
+
 Version 1.1.3:
  * added `help => hidden` for commands and options
  * changed default formatting for better readability
