@@ -1,0 +1,18 @@
+stages:
+  - test
+
+test-default-docker:
+  tags:
+    - linux
+  image: erlang:latest
+  stage: test
+  script:
+    - rebar3 compile
+    - rebar3 ct
+    - rebar3 edoc
+    - rebar3 dialyzer
+  artifacts:
+    expire_in: 1 week
+    reports:
+      junit:
+        - _build/test/logs/*/junit_report.xml

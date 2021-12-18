@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2020, Maxim Fedorov <maximfca@mail.com>
+%%% @copyright (C) 2020-2021, Maxim Fedorov <maximfca@mail.com>
 %%% @doc
 %%%  Tests for argparse library.
 %%% @end
@@ -26,6 +26,7 @@
     multi_short/0, multi_short/1,
     proxy_arguments/0, proxy_arguments/1,
     usage/0, usage/1,
+    usage_required_args/0, usage_required_args/1,
     readme/0, readme/1,
     error_usage/0, error_usage/1,
     meta/0, meta/1,
@@ -696,6 +697,14 @@ usage(Config) when is_list(Config) ->
         "\n  -i          interval set (int > 1)\n  --req       required optional, right?\n  --float     floating-point long form argument (float, 3.14)\n",
     ?assertEqual(CrawlerStatus, argparse:help(Cmd, #{command => ["status", "crawler"]})),
     ok.
+
+usage_required_args() ->
+    [{doc, "Verify that required args are printed as required in usage"}].
+
+usage_required_args(Config) when is_list(Config) ->
+    Cmd = #{commands => #{"test" => #{arguments => [#{name => required, required => true, long => "-req"}]}}},
+    Expected = "",
+    ?assertEqual(Expected, argparse:help(Cmd, #{command => ["test"]})).
 
 error_usage() ->
     [{doc, "Test that usage information is added to errors"}].
