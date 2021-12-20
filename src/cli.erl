@@ -18,9 +18,12 @@
 %%%     <li>`module()'   - use this module (must export `cli/0')</li>
 %%%     <li>[module()]   - list of modules (must export `cli/0')</li></ul></li>
 %%% <li>`warn': set to `suppress' suppresses warnings logged</li>
+%%% <li>`error': defines what action is taken upon parser error. Use `ok' to completely ignore the
+%%%      error (historical behaviour, useful for testing), `error' to raise an exception,
+%%%      `halt' to halt the emulator with exit code 1 (default behaviour), and `{halt, non_neg_integer()}'
+%%%      for a custom exit code halting the emulator</li>
 %%% <li>`help': set to false suppresses printing `usage' when parser produces
 %%%      an error, and disables default --help/-h behaviour</li>
-%%% <li>`default': deprecated, value to use for cli/1 callback in a positional form</li>
 %%% <li>`prefixes': prefixes passed to argparse</li>
 %%% <li>`progname': specifies executable name instead of 'erl'</li>
 %%% </ul>
@@ -75,7 +78,7 @@ run(Args) ->
     modules => all_loaded | module() | [module()],
     warn => suppress | warn,
     help => boolean(),
-    default => term(),      %% deprecated, to be removed in 2.0
+    error => ok | error | halt | {halt, non_neg_integer()},
     prefixes => [integer()],%% prefixes passed to argparse
     progname => string()    %% specifies executable name instead of 'erl'
 }.
@@ -85,7 +88,8 @@ run(Args) ->
 %%  then matches a command and runs handler defined for
 %%  a command.
 %% @param Args arguments used to run CLI, e.g. init:get_plain_arguments().
-%% @returns callback result, ok 'ok' when help/error message printed.
+%% @returns callback result, or 'ok' when help/error message printed, and
+%%  `error' parameter is set to `ok' (meaning, ignore errors, always return ok)
 -spec run([string()], run_options()) -> term().
 run(Args, Options) ->
     Modules = modules(maps:get(modules, Options, all_loaded)),
@@ -168,7 +172,8 @@ dispatch(Args, CmdMap, Modules, Options) ->
             run_handler(CmdMap, ArgMap, {[], CmdMap}, {Modules, Options})
     catch
         error:{argparse, Reason} when HelpEnabled =:= false ->
-            io:format("error: ~s", [argparse:format_error(Reason)]);
+            io:format("error: ~s", [argparse:format_error(Reason)]),
+            dispatch_error(Options, Reason);
         error:{argparse, Reason} ->
             %% see if it was cry for help that triggered error message
             Prefixes = maps:get(prefixes, Options, "-"),
@@ -179,12 +184,21 @@ dispatch(Args, CmdMap, Modules, Options) ->
                 CmdPath ->
                     Fmt = argparse:help(CmdMap, Options#{command => tl(CmdPath)}),
                     io:format("~s", [Fmt])
-            end
+            end,
+            dispatch_error(Options, Reason)
     end.
 
-%% Dialyzer: suppress the warning about deprecated feature (it has been
-%%  removed from successful typing to facilitate deprecation).
--dialyzer({no_match, run_handler/4}).
+dispatch_error(#{error := ok}, _Reason) ->
+    ok;
+dispatch_error(#{error := error}, Reason) ->
+    error(Reason);
+dispatch_error(#{error := halt}, _Reason) ->
+    erlang:halt(1);
+dispatch_error(#{error := {halt, Exit}}, _Reason) ->
+    erlang:halt(Exit);
+%% default is halt(1)
+dispatch_error(_Options, _Reason) ->
+    erlang:halt(1).
 
 %% Executes handler
 run_handler(CmdMap, ArgMap, {Path, #{handler := {Mod, ModFun, Default}}}, _MO) ->
@@ -199,11 +213,6 @@ run_handler(CmdMap, ArgMap, {Path, #{handler := {Fun, Default}}}, _MO) when is_f
     erlang:apply(Fun, ArgList);
 run_handler(_CmdMap, ArgMap, {_Path, #{handler := Handler}}, _MO) when is_function(Handler, 1) ->
     Handler(ArgMap);
-%% below is compatibility mode: cli/1 behaviour has been removed in 1.1.0, but
-%%  is still honoured for existing users
-run_handler(CmdMap, ArgMap, {[], _}, {Modules, Options}) when is_map_key(default, Options) ->
-    ArgList = arg_map_to_arg_list(CmdMap, [], ArgMap, maps:get(default, Options)),
-    exec_cli(Modules, CmdMap, ArgList, Options);
 run_handler(CmdMap, ArgMap, {[], _}, {Modules, Options}) ->
     % {undefined, {ok, Default}, Modules, Options}
     exec_cli(Modules, CmdMap, [ArgMap], Options).

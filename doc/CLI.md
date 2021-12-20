@@ -23,7 +23,7 @@ Implementing a utility with a single command to run requires:
     -mode(compile). %% evaluated module cannot contain callbacks
 
     main(Args) ->
-        cli:run(Args, #{progname => "simple").
+        cli:run(Args, #{progname => "simple"}).
 
     cli() ->
         #{arguments => [
@@ -120,4 +120,4 @@ to provide correct help/usage line:
 ## Reference
 
 cli is able to pass **prefixes** option to argparse (this also changes *-h* and *--help*
-prefix).
+prefix). There are also additional options to explore, see `cli:run/2` function reference.
