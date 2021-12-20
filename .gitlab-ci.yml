@@ -8,11 +8,14 @@ test-default-docker:
   stage: test
   script:
     - rebar3 compile
-    - rebar3 ct
     - rebar3 edoc
     - rebar3 dialyzer
+    - rebar3 ct
   artifacts:
-    expire_in: 1 week
+    when: always
+    paths:
+      - "_build/test/logs/last/**"
+    expire_in: 3 days
     reports:
       junit:
-        - _build/test/logs/*/junit_report.xml
+        - _build/test/logs/last/junit_report.xml

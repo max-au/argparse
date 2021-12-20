@@ -679,7 +679,7 @@ usage() ->
 
 usage(Config) when is_list(Config) ->
     Cmd = ubiq_cmd(),
-    Usage = "usage: " ++ prog() ++ " start {crawler|doze} [-lrfv] [-s <shard>...] [-z <z>] [-m <more>] [-b <bin>] [-g <g>] [-t <t>] ---maybe-req [-y <y>]"
+    Usage = "usage: " ++ prog() ++ " start {crawler|doze} [-lrfv] [-s <shard>...] [-z <z>] [-m <more>] [-b <bin>] [-g <g>] [-t <t>] ---maybe-req -y <y>"
         " --yyy <y> [-u <u>] [-c <choice>] [-q <fc>] [-foobar <long>] [--force] [-i <interval>] [--req <weird>] [--float <float>] <server> [<optpos>]"
         "\n\nSubcommands:\n  crawler      controls crawler behaviour\n  doze         dozes a bit\n\nArguments:\n  server       server to start\n  optpos       optional positional (int)"
         "\n\nOptional arguments:\n  -s           initial shards (int)\n  -z           between (1 < int < 10)\n  -l           maybe lower (int < 10)"

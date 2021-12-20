@@ -1135,7 +1135,7 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) when ?IS_
             {ok, Short} when RequiresArg ->
                 SN = [Prefix, Short],
                 {maybe_concat(SN, Name0), [],
-                    [format_required(false, SN ++ " ", Opt) | MaybeOpt0]};
+                    [format_required(NonOption, SN ++ " ", Opt) | MaybeOpt0]};
             {ok, Short} ->
                 {maybe_concat([Prefix, Short], Name0), [Short], MaybeOpt0}
         end,
