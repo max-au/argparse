@@ -10,7 +10,7 @@
 
 main(Args) ->
     Out = cli:run(Args, #{progname => "calc"}),
-    Out =/= ok andalso io:format("~p~n", [Out]).
+    io:format("~p~n", [Out]).
 
 cli() ->
     #{
