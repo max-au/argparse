@@ -96,7 +96,7 @@
 -type argument() :: #{
     %% Argument name, and a destination to store value too
     %% It is allowed to have several arguments named the same, setting or appending to the same variable.
-    %% It is used to format the name, hence it should be format-table with "~s".
+    %% It is used to format the name, hence it should be format-table with "~ts".
     name := atom() | string() | binary(),
 
     %% short, single-character variant of command line option, omitting dash (example: $b, meaning -b),
@@ -280,7 +280,7 @@ help(Command) ->
 %% Returns help for Command formatted according to Options specified
 -spec help(command() | command_spec(), parser_options()) -> string().
 help(Command, Options) ->
-    format_help(validate(Command, Options), Options).
+    unicode:characters_to_list(format_help(validate(Command, Options), Options)).
 
 %% @doc Format exception reasons produced by parse/2.
 %% Exception of class error with reason {argparse, Reason} is normally
@@ -289,19 +289,19 @@ help(Command, Options) ->
 %% @returns string, ready to be printed via io:format().
 -spec format_error(Reason :: argparse_reason()) -> string().
 format_error({invalid_command, Path, Field, Text}) ->
-    lists:flatten(io_lib:format("~sinternal error, invalid field '~s': ~s~n",
+    unicode:characters_to_list(io_lib:format("~tsinternal error, invalid field '~ts': ~ts~n",
         [format_path(Path), Field, Text]));
 format_error({invalid_option, Path, Name, Field, Text}) ->
-    lists:flatten(io_lib:format("~sinternal error, option ~s field '~s': ~s~n",
+    unicode:characters_to_list(io_lib:format("~tsinternal error, option ~ts field '~ts': ~ts~n",
         [format_path(Path), Name, Field, Text]));
 format_error({unknown_argument, Path, Argument}) ->
-    lists:flatten(io_lib:format("~sunrecognised argument: ~s~n",
+    unicode:characters_to_list(io_lib:format("~tsunrecognised argument: ~ts~n",
         [format_path(Path), Argument]));
 format_error({missing_argument, Path, Name}) ->
-    lists:flatten(io_lib:format("~srequired argument missing: ~s~n",
+    unicode:characters_to_list(io_lib:format("~tsrequired argument missing: ~ts~n",
         [format_path(Path), Name]));
 format_error({invalid_argument, Path, Name, Value}) ->
-    lists:flatten(io_lib:format("~sinvalid argument ~s for: ~s~n",
+    unicode:characters_to_list(io_lib:format("~tsinvalid argument ~ts for: ~ts~n",
         [format_path(Path), Value, Name])).
 
 %% @doc Formats exception, and adds command usage information for
@@ -717,21 +717,21 @@ convert_type(boolean, "false", _Opt, _Eos) ->
 convert_type(boolean, Arg, Opt, Eos) ->
     fail({invalid_argument, Eos#eos.commands, Opt, Arg});
 convert_type(binary, Arg, _Opt, _Eos) ->
-    list_to_binary(Arg);
+    unicode:characters_to_binary(Arg);
 convert_type({binary, Choices}, Arg, Opt, Eos) when is_list(Choices), is_binary(hd(Choices)) ->
-    Conv = list_to_binary(Arg),
+    Conv = unicode:characters_to_binary(Arg),
     lists:member(Conv, Choices) orelse
         fail({invalid_argument, Eos#eos.commands, Opt, Arg}),
     Conv;
 convert_type({binary, Re}, Arg, Opt, Eos) ->
     case re:run(Arg, Re) of
-        {match, _X} -> list_to_binary(Arg);
+        {match, _X} -> unicode:characters_to_binary(Arg);
         _ -> fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end;
 convert_type({binary, Re, ReOpt}, Arg, Opt, Eos) ->
     case re:run(Arg, Re, ReOpt) of
-        match -> list_to_binary(Arg);
-        {match, _} -> list_to_binary(Arg);
+        match -> unicode:characters_to_binary(Arg);
+        {match, _} -> unicode:characters_to_binary(Arg);
         _ -> fail({invalid_argument, Eos#eos.commands, Opt, Arg})
     end;
 convert_type(float, Arg, Opt, Eos) ->
@@ -887,7 +887,7 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
                 fun (#{short := Short, name := OName}, {AllS, AllL}) ->
                         is_map_key(Short, AllS) andalso
                             fail({invalid_option, clean_path(Path), OName, short,
-                                    "short conflicting with " ++ atom_to_list(maps:get(Short, AllS))}),
+                                "short conflicting with " ++ atom_to_list(maps:get(Short, AllS))}),
                         {AllS#{Short => OName}, AllL};
                     (#{long := Long, name := OName}, {AllS, AllL}) ->
                         is_map_key(Long, AllL) andalso
@@ -913,7 +913,7 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
     end.
 
 %% validates option spec
-validate_option(Path, #{name := Name} = Opt) when is_atom(Name) ->
+validate_option(Path, #{name := Name} = Opt) when is_atom(Name); is_list(Name); is_binary(Name) ->
     %% arguments cannot have unrecognised map items
     Unknown = maps:keys(maps:without([name, help, short, long, action, nargs, type, default, required], Opt)),
     Unknown =/= [] andalso fail({invalid_option, clean_path(Path), hd(Unknown), "unrecognised field"}),
@@ -921,12 +921,12 @@ validate_option(Path, #{name := Name} = Opt) when is_atom(Name) ->
     %% help: string, 'hidden', or a tuple of {string(), ...}
     is_valid_option_help(maps:get(help, Opt, [])) orelse
         fail({invalid_option, clean_path(Path), Name, help, "must be a string or valid help template, ensure help template is a list"}),
-    is_list(maps:get(long, Opt, [])) orelse
-        fail({invalid_option, clean_path(Path), Name, long, "must be a string"}),
+    io_lib:printable_unicode_list(maps:get(long, Opt, [])) orelse
+        fail({invalid_option, clean_path(Path), Name, long, "must be a printable string"}),
     is_boolean(maps:get(required, Opt, true)) orelse
         fail({invalid_option, clean_path(Path), Name, required, "must be boolean"}),
-    is_integer(maps:get(short, Opt, $a)) orelse
-        fail({invalid_option, clean_path(Path), Name, short, "must be character"}),
+    io_lib:printable_unicode_list([maps:get(short, Opt, $a)]) orelse
+        fail({invalid_option, clean_path(Path), Name, short, "must be a printable character"}),
     Opt1 = maybe_validate(action, Opt, fun validate_action/3, Path),
     Opt2 = maybe_validate(type, Opt1, fun validate_type/3, Path),
     maybe_validate(nargs, Opt2, fun validate_args/3, Path);
@@ -1053,11 +1053,11 @@ format_help({RootCmd, Root}, Format) ->
             {Long, SubAcc};
             (Name, Sub, {Long, SubAcc}) ->
             Help = maps:get(help, Sub, ""),
-            {max(Long, length(Name)), [{Name, Help}|SubAcc]}
+            {max(Long, string:length(Name)), [{Name, Help}|SubAcc]}
         end, {Longest, []}, Immediate),
     %% format sub-commands
-    SubFormat = io_lib:format("  ~~-~bs ~~s~n", [Long]),
-    Commands = lists:concat([io_lib:format(SubFormat, [N, D]) || {N, D} <- lists:reverse(Subs)]),
+    SubFormat = io_lib:format("  ~~-~bts ~~ts~n", [Long]),
+    Commands = [io_lib:format(SubFormat, [N, D]) || {N, D} <- lists:reverse(Subs)],
     ShortCmd =
         case map_size(Immediate) of
             0 when Nested =:= [] ->
@@ -1068,21 +1068,21 @@ format_help({RootCmd, Root}, Format) ->
                 " " ++ lists:concat(lists:join(" ", Nested)) ++  " {" ++
                     lists:concat(lists:join("|", maps:keys(Immediate))) ++ "}";
             _Largs ->
-                io_lib:format("~s <command>", [lists:concat(lists:join(" ", Nested))])
+                io_lib:format("~ts <command>", [lists:concat(lists:join(" ", Nested))])
         end,
     %% format flags
-    FlagsForm = if Flags =:=[] -> ""; true -> io_lib:format(" [~c~s]", [Prefix, Flags]) end,
+    FlagsForm = if Flags =:=[] -> ""; true -> io_lib:format(" [~tc~ts]", [Prefix, Flags]) end,
     %% format extended view
-    OptFormat = io_lib:format("  ~~-~bs ~~s~n", [Longest]),
+    OptFormat = io_lib:format("  ~~-~bts ~~ts~n", [Longest]),
     %% split OptLines into positional and optional arguments
     FormattedOpts = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- lists:reverse(OptL)],
     FormattedArgs = [io_lib:format(OptFormat, [Hdr, Dsc]) || {Hdr, Dsc} <- lists:reverse(PosL)],
     %% format first usage line
-    lists:flatten(io_lib:format("usage: ~s~s~s~s~s~s~n~s~s~s", [RootCmd, ShortCmd, FlagsForm, Opts, Args,
-        maybe_add("~n~s", maps:get(help, Root, "")),
-        maybe_add("~nSubcommands:~n~s", Commands),
-        maybe_add("~nArguments:~n~s", FormattedArgs),
-        maybe_add("~nOptional arguments:~n~s", FormattedOpts)])).
+    io_lib:format("usage: ~ts~ts~ts~ts~ts~ts~n~ts~ts~ts", [RootCmd, ShortCmd, FlagsForm, Opts, Args,
+        maybe_add("~n~ts", maps:get(help, Root, "")),
+        maybe_add("~nSubcommands:~n~ts", Commands),
+        maybe_add("~nArguments:~n~ts", FormattedArgs),
+        maybe_add("~nOptional arguments:~n~ts", FormattedOpts)]).
 
 %% collects options on the Path, and returns found Command
 collect_options(CmdName, Command, [], Args) ->
@@ -1125,7 +1125,7 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) when ?IS_
                 {FN, [[$ |FN]]};
             {ok, Long} ->
                 FN = [Prefix | Long],
-                {FN, [io_lib:format(" [~s]", [FN])]}
+                {FN, [io_lib:format(" [~ts]", [FN])]}
         end,
     %% short may go to flags, or Opts
     {Name, MaybeFlag, MaybeOpt1} =
@@ -1148,7 +1148,7 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) when ?IS_
                 MaybeOpt1
         end,
     %% name length, capped at 24
-    NameLen = length(Name),
+    NameLen = string:length(Name),
     Capped = min(24, NameLen),
     {Prefix, max(Capped, Longest), Flags ++ MaybeFlag, Opts ++ MaybeOpt2, Args, [{Name, Desc} | OptL], PosL};
 
@@ -1156,14 +1156,14 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) when ?IS_
 format_opt_help(#{name := Name} = Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) ->
     Desc = format_description(Opt),
     %% positional, hence required
-    LName = io_lib:format("~s", [Name]),
+    LName = io_lib:format("~ts", [Name]),
     LPos = case maps:find(help, Opt) of
                {ok, {Str, _}} ->
                    [$ | Str];
                _ ->
                    format_required(maps:get(required, Opt, true), "", Opt)
            end,
-    {Prefix, max(Longest, length(LName)), Flags, Opts, Args ++ LPos, OptL, [{LName, Desc}|PosL]}.
+    {Prefix, max(Longest, string:length(LName)), Flags, Opts, Args ++ LPos, OptL, [{LName, Desc}|PosL]}.
 
 %% custom format
 format_description(#{help := {_Short, Fun}}) when is_function(Fun, 0) ->
@@ -1180,14 +1180,15 @@ format_description(#{help := {_Short, Desc}} = Opt) ->
     );
 %% default format: "desc", "desc (type)", "desc (default)", "desc (type, default)"
 format_description(#{name := Name} = Opt) ->
-    case {maps:get(help, Opt, atom_to_list(Name)), format_type(Opt), format_default(Opt)} of
+    NameStr = maps:get(help, Opt, io_lib:format("~ts", [Name])),
+    case {NameStr, format_type(Opt), format_default(Opt)} of
         {"", "", Type} -> Type;
         {"", Default, ""} -> Default;
         {Desc, "", ""} -> Desc;
-        {Desc, "", Default} -> Desc ++ " (" ++ Default ++ ")";
-        {Desc, Type, ""} -> Desc ++ " (" ++ Type ++ ")";
-        {"", Type, Default} -> Type ++ ", " ++ Default;
-        {Desc, Type, Default} -> Desc ++ " (" ++ Type ++ ", " ++ Default ++ ")"
+        {Desc, "", Default} -> [Desc, " (", Default, ")"];
+        {Desc, Type, ""} -> [Desc, " (", Type, ")"];
+        {"", Type, Default} -> [Type, ", ", Default];
+        {Desc, Type, Default} -> [Desc, " (", Type, ", ", Default, ")"]
     end.
 
 %% option formatting helpers
@@ -1195,9 +1196,9 @@ maybe_concat(No, []) -> No;
 maybe_concat(No, L) -> No ++ ", " ++ L.
 
 format_required(true, Extra, #{name := Name} = Opt) ->
-    io_lib:format(" ~s<~s>~s", [Extra, Name, format_nargs(Opt)]);
+    io_lib:format(" ~ts<~ts>~ts", [Extra, Name, format_nargs(Opt)]);
 format_required(false, Extra, #{name := Name} = Opt) ->
-    io_lib:format(" [~s<~s>~s]", [Extra, Name, format_nargs(Opt)]).
+    io_lib:format(" [~ts<~ts>~ts]", [Extra, Name, format_nargs(Opt)]).
 
 format_nargs(#{nargs := Dots}) when Dots =:= list; Dots =:= all; Dots =:= nonempty_list ->
     "...";
@@ -1220,22 +1221,24 @@ format_type(#{type := {Num, Valid}}) when Num =:= int; Num =:= float ->
             io_lib:format("~tp < ~s < ~tp", [Min, Num, Max])
     end;
 format_type(#{type := {string, Re, _}}) when is_list(Re), not is_list(hd(Re)) ->
-    io_lib:format("string re: ~s", [Re]);
+    io_lib:format("string re: ~ts", [Re]);
 format_type(#{type := {string, Re}}) when is_list(Re), not is_list(hd(Re)) ->
-    io_lib:format("string re: ~s", [Re]);
+    io_lib:format("string re: ~ts", [Re]);
 format_type(#{type := {binary, Re}}) when is_binary(Re) ->
-    io_lib:format("binary re: ~s", [Re]);
+    io_lib:format("binary re: ~ts", [Re]);
 format_type(#{type := {binary, Re, _}}) when is_binary(Re) ->
-    io_lib:format("binary re: ~s", [Re]);
+    io_lib:format("binary re: ~ts", [Re]);
 format_type(#{type := {StrBin, Choices}}) when StrBin =:= string orelse StrBin =:= binary, is_list(Choices) ->
-    io_lib:format("choice: ~s", [lists:join(", ", [Choices])]);
+    io_lib:format("choice: ~ts", [lists:join(", ", [Choices])]);
 format_type(#{type := boolean}) ->
     "";
 format_type(#{type := Type}) when is_atom(Type) ->
-    io_lib:format("~s", [Type]);
+    io_lib:format("~ts", [Type]);
 format_type(_Opt) ->
     "".
 
+format_default(#{default := Def}) when is_list(Def); is_binary(Def); is_atom(Def) ->
+    io_lib:format("~ts", [Def]);
 format_default(#{default := Def}) ->
     io_lib:format("~tp", [Def]);
 format_default(_) ->
