@@ -91,13 +91,13 @@ ubiq_cmd() ->
                     #{name => shard, short => $s, type => int, nargs => nonempty_list, help => "initial shards"},
                     #{name => part, short => $p, type => int, nargs => list, help => hidden},
                     #{name => z, short => $z, type => {int, [{min, 1}, {max, 10}]}, help => "between"},
-                    #{name => l, short => $l, type => {int, [{max, 10}]}, nargs => maybe, help => "maybe lower"},
+                    #{name => l, short => $l, type => {int, [{max, 10}]}, nargs => 'maybe', help => "maybe lower"},
                     #{name => more, short => $m, type => {int, [{max, 10}]}, help => "less than 10"},
                     #{name => optpos, required => false, type => {int, []}, help => "optional positional"},
                     #{name => bin, short => $b, type => {binary, <<"m">>}, help => "binary with re"},
                     #{name => g, short => $g, type => {binary, <<"m">>, []}, help => "binary with re"},
                     #{name => t, short => $t, type => {string, "m"}, help => "string with re"},
-                    #{name => e, long => "--maybe-req", required => true, type => int, nargs => maybe, help => "maybe required int"},
+                    #{name => e, long => "--maybe-req", required => true, type => int, nargs => 'maybe', help => "maybe required int"},
                     #{name => y, required => true, long => "-yyy", short => $y, type => {string, "m", []}, help => "string with re"},
                     #{name => u, short => $u, type => {string, ["1", "2"]}, help => "string choices"},
                     #{name => choice, short => $c, type => {int, [1,2,3]}, help => "tough choice"},
@@ -442,8 +442,8 @@ args(Config) when is_list(Config) ->
         parse_opts(["-x port a b c -x X"], OptsAll)),
     %%
     OptMaybe = [
-        #{name => foo, long => "-foo", nargs => {maybe, c}, default => d},
-        #{name => bar, nargs => maybe, default => d}
+        #{name => foo, long => "-foo", nargs => {'maybe', c}, default => d},
+        #{name => bar, nargs => 'maybe', default => d}
     ],
     ?assertEqual(#{foo => "YY", bar => "XX"},
         parse_opts(["XX --foo YY"], OptMaybe)),
@@ -453,16 +453,16 @@ args(Config) when is_list(Config) ->
         parse_opts([""], OptMaybe)),
     %% maybe with default
     ?assertEqual(#{foo => d, bar => "XX", baz => ok},
-        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, default => ok} | OptMaybe])),
+        parse_opts(["XX -b"], [#{name => baz, nargs => 'maybe', short => $b, default => ok} | OptMaybe])),
     %% maybe arg - with no default given
     ?assertEqual(#{foo => d, bar => "XX", baz => 0},
-        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => int} | OptMaybe])),
+        parse_opts(["XX -b"], [#{name => baz, nargs => 'maybe', short => $b, type => int} | OptMaybe])),
     ?assertEqual(#{foo => d, bar => "XX", baz => ""},
-        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => string} | OptMaybe])),
+        parse_opts(["XX -b"], [#{name => baz, nargs => 'maybe', short => $b, type => string} | OptMaybe])),
     ?assertEqual(#{foo => d, bar => "XX", baz => undefined},
-        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => atom} | OptMaybe])),
+        parse_opts(["XX -b"], [#{name => baz, nargs => 'maybe', short => $b, type => atom} | OptMaybe])),
     ?assertEqual(#{foo => d, bar => "XX", baz => <<"">>},
-        parse_opts(["XX -b"], [#{name => baz, nargs => maybe, short => $b, type => binary} | OptMaybe])),
+        parse_opts(["XX -b"], [#{name => baz, nargs => 'maybe', short => $b, type => binary} | OptMaybe])),
     %% nargs: optional list, yet it still needs to be 'not required'!
     OptList = [#{name => arg, nargs => list, required => false, type => int}],
     ?assertEqual(#{}, parse_opts("", OptList)),
@@ -523,14 +523,14 @@ negative() ->
 negative(Config) when is_list(Config) ->
     Parser = #{arguments => [
         #{name => x, short => $x, type => int, action => store},
-        #{name => foo, nargs => maybe, required => false}
+        #{name => foo, nargs => 'maybe', required => false}
     ]},
     ?assertEqual(#{x => -1}, parse("-x -1", Parser)),
     ?assertEqual(#{x => -1, foo => "-5"}, parse("-x -1 -5", Parser)),
     %%
     Parser2 = #{arguments => [
         #{name => one, short => $1},
-        #{name => foo, nargs => maybe, required => false}
+        #{name => foo, nargs => 'maybe', required => false}
     ]},
 
     %% negative number options present, so -1 is an option
@@ -758,11 +758,11 @@ meta(Config) when is_list(Config) ->
     %% extend + maybe
     ?assertException(error, {argparse, {invalid_option, _, short49, action, _}},
         parse("-1 -1", #{arguments =>
-        [#{action => extend, name => short49, nargs => maybe, short => 49}]})),
+        [#{action => extend, name => short49, nargs => 'maybe', short => 49}]})),
     %%
     ?assertEqual(#{short49 => 2},
         parse("-1 arg1 --force", #{arguments =>
-        [#{action => count, long => "-force", name => short49, nargs => maybe, short => 49}]})),
+        [#{action => count, long => "-force", name => short49, nargs => 'maybe', short => 49}]})),
     ok.
 
 usage_template() ->

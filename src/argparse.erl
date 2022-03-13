@@ -129,8 +129,8 @@
     nargs =>
         pos_integer() |     %% consume exactly this amount, e.g. '-kernel key value' #{long => "-kernel", args => 2}
                             %%      returns #{kernel => ["key", "value"]}
-        maybe |             %% if next argument is positional, consume it, otherwise produce default
-        {maybe, term()} |   %% if next argument is positional, consume it, otherwise produce term()
+        'maybe' |           %% if next argument is positional, consume it, otherwise produce default
+        {'maybe', term()} | %% if next argument is positional, consume it, otherwise produce term()
         list |              %% consume zero or more positional arguments, until next optional
         nonempty_list |     %% consume at least one positional argument, until next optional
         all,                %% fold remaining command line into this argument
@@ -503,9 +503,9 @@ no_digits(true, _, _, Long) ->
 
 %% Returns true when option (!) description passed requires a positional argument,
 %%  hence cannot be treated as a flag.
-requires_argument(#{nargs := {maybe, _Term}}) ->
+requires_argument(#{nargs := {'maybe', _Term}}) ->
     false;
-requires_argument(#{nargs := maybe}) ->
+requires_argument(#{nargs := 'maybe'}) ->
     false;
 requires_argument(#{nargs := _Any}) ->
     true;
@@ -572,7 +572,7 @@ consume(Tail, #{type := boolean} = Opt, Eos) ->
     action(Tail, true, Opt#{type => raw}, Eos);
 
 %% maybe behaviour, as '?'
-consume(Tail, #{nargs := maybe} = Opt, Eos) ->
+consume(Tail, #{nargs := 'maybe'} = Opt, Eos) ->
     case split_to_option(Tail, 1, Eos, []) of
         {[], _} ->
             %% no argument given, produce default argument (if not present,
@@ -583,7 +583,7 @@ consume(Tail, #{nargs := maybe} = Opt, Eos) ->
     end;
 
 %% maybe consume one, maybe not...
-consume(Tail, #{nargs := {maybe, Const}} = Opt, Eos) ->
+consume(Tail, #{nargs := {'maybe', Const}} = Opt, Eos) ->
     case split_to_option(Tail, 1, Eos, []) of
         {[], _} ->
             action(Tail, Const, Opt, Eos);
@@ -985,9 +985,9 @@ validate_type(_Type, Path, #{name := Name}) ->
     fail({invalid_option, clean_path(Path), Name, type, "unsupported"}).
 
 validate_args(N, _Path, _Opt) when is_integer(N), N >= 1 -> N;
-validate_args(Simple, _Path, _Opt) when Simple =:= all; Simple =:= list; Simple =:= maybe; Simple =:= nonempty_list ->
+validate_args(Simple, _Path, _Opt) when Simple =:= all; Simple =:= list; Simple =:= 'maybe'; Simple =:= nonempty_list ->
     Simple;
-validate_args({maybe, Term}, _Path, _Opt) -> {maybe, Term};
+validate_args({'maybe', Term}, _Path, _Opt) -> {'maybe', Term};
 validate_args(_Nargs, Path, #{name := Name}) ->
     fail({invalid_option, clean_path(Path), Name, nargs, "unsupported"}).
 
