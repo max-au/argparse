@@ -13,6 +13,7 @@
     long_form_eq/0, long_form_eq/1,
     single_arg_built_in_types/0, single_arg_built_in_types/1,
     complex_command/0, complex_command/1,
+    unicode/0, unicode/1,
     errors/0, errors/1,
     args/0, args/1,
     argparse/0, argparse/1,
@@ -43,7 +44,7 @@ suite() ->
 groups() ->
     [{parallel, [parallel], [
         basic, long_form_eq, single_arg_built_in_types, complex_command, errors,
-        args, argparse, negative, proxy_arguments,
+        unicode, args, argparse, negative, proxy_arguments,
         nodigits,  python_issue_15112, type_validators, subcommand, error_format,
         very_short, multi_short, usage, readme, error_usage, meta, usage_template
     ]}].
@@ -311,6 +312,27 @@ complex_command(Config) when is_list(Config) ->
     Expected = #{float => [1.04, 112], boolean => [true, true], integer => 42, string => ["s1", "s2", "s3", "s4"]},
     ?assertEqual({Expected, {["start"], Command}}, Parsed).
 
+unicode() ->
+    [{doc, "Ensure unicode support"}].
+
+unicode(Config) when is_list(Config) ->
+    %% test unicode short & long
+    ?assertEqual(#{one => true}, parse(["-Ф"], #{arguments => [#{name => one, short => $Ф, type => boolean}]})),
+    ?assertEqual(#{long => true}, parse(["--åäö"], #{arguments => [#{name => long, long => "-åäö", type => boolean}]})),
+    %% test default, help and value in unicode
+    Cmd = #{arguments => [#{name => text, type => binary, help => "åäö", default => <<"★"/utf8>>}]},
+    Expected = #{text => <<"★"/utf8>>},
+    ?assertEqual(Expected, argparse:parse([], Cmd)), %% default
+    ?assertEqual(Expected, argparse:parse(["★"], Cmd)), %% specified in the command line
+    ?assertEqual("usage: erl <text>\n\nArguments:\n  text åäö (binary, ★)\n", argparse:help(Cmd)),
+    %% test command name and argument name in unicode
+    Uni = #{commands => #{"åäö" => #{help => "öФ"}}, handler => optional,
+        arguments => [#{name => "Ф", short => $ä, long => "åäö"}]},
+    UniExpected = "usage: erl  {åäö} [-ä <Ф>] [-åäö <Ф>]\n\nSubcommands:\n  åäö      öФ\n\nOptional arguments:\n  -ä, -åäö Ф\n",
+    ?assertEqual(UniExpected, argparse:help(Uni)),
+    ParsedExpected = #{"Ф" => "öФ"},
+    ?assertEqual(ParsedExpected, argparse:parse(["-ä", "öФ"], Uni)).
+
 errors() ->
     [{doc, "Tests for various errors, missing arguments etc"}].
 
@@ -322,10 +344,15 @@ errors(Config) when is_list(Config) ->
     ?assertException(error, {argparse, {invalid_option, _, two, long, "long conflicting with one"}},
         parse("", #{arguments => [#{name => one, long => "a"}, #{name => two, long => "a"}]})),
     %% broken options
+    %% long must be a string
     ?assertException(error, {argparse, {invalid_option, _, one, long, _}},
         parse("", #{arguments => [#{name => one, long => ok}]})),
+    %% short must be a printable character
     ?assertException(error, {argparse, {invalid_option, _, one, short, _}},
         parse("", #{arguments => [#{name => one, short => ok}]})),
+    ?assertException(error, {argparse, {invalid_option, _, one, short, _}},
+        parse("", #{arguments => [#{name => one, short => 7}]})),
+    %% required is a boolean
     ?assertException(error, {argparse, {invalid_option, _, one, required, _}},
         parse("", #{arguments => [#{name => one, required => ok}]})),
     ?assertException(error, {argparse, {invalid_option, _, one, help, _}},
@@ -573,7 +600,7 @@ error_format() ->
     [{doc, "Tests error output formatter"}].
 
 error_format(Config) when is_list(Config) ->
-    %% does not really require testing, but server well as contract,
+    %% does not really require testing, but serve well as contract,
     %%  and good for coverage
     {ok, [[Prog]]} = init:get_argument(progname),
     ?assertEqual(Prog ++ ": internal error, invalid field 'commands': sub-commands must be a map\n",
