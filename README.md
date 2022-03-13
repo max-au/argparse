@@ -189,7 +189,7 @@ be followed at a time.
 
 ## Expected features
 
-To be considered after 1.2:
+To be considered after 1.2.0:
 * search for commands and arguments (mini-man)
 * abbreviated long forms
 * mutual exclusion groups
@@ -198,7 +198,7 @@ To be considered after 1.2:
 
 ## Changelog
 
-Version 1.2:
+Version 1.2.0:
 * CLI incompatible change: `cli:run/1,2` by default now calls halt(1) in case of a parser error
 * bugfixes
 
