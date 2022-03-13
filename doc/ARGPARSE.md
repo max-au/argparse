@@ -131,10 +131,10 @@ It is treated the same way as `mycli --arg value`.
 
 For every argument matched, parser may consume several following positional arguments
 (not starting with a prefix). Analysis is based on **nargs**, **action** and **type** fields.
- * when nargs is **maybe** and next argument is positional, it gets consumed and produced
+ * when nargs is **'maybe'** and next argument is positional, it gets consumed and produced
     as value, and if next argument starts with option prefix, **default** value is produced
     (when no default present, default value deduced from argument **type**)
- * when nargs is **{maybe, Term}**, and next argument starts with option prefix, Term is
+ * when nargs is **{'maybe', Term}**, and next argument starts with option prefix, Term is
     produced
  * when nargs is set to a positive integer, parser tries to consume exactly this
     number of positional arguments, and fails with an error if there is not enough.
