@@ -1229,7 +1229,7 @@ format_type(#{type := {binary, Re}}) when is_binary(Re) ->
 format_type(#{type := {binary, Re, _}}) when is_binary(Re) ->
     io_lib:format("binary re: ~ts", [Re]);
 format_type(#{type := {StrBin, Choices}}) when StrBin =:= string orelse StrBin =:= binary, is_list(Choices) ->
-    io_lib:format("choice: ~ts", [lists:join(", ", [Choices])]);
+    io_lib:format("choice: ~ts", [lists:join(", ", Choices)]);
 format_type(#{type := boolean}) ->
     "";
 format_type(#{type := Type}) when is_atom(Type) ->
