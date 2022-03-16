@@ -711,7 +711,7 @@ usage(Config) when is_list(Config) ->
         "\n\nSubcommands:\n  crawler      controls crawler behaviour\n  doze         dozes a bit\n\nArguments:\n  server       server to start\n  optpos       optional positional (int)"
         "\n\nOptional arguments:\n  -s           initial shards (int)\n  -z           between (1 < int < 10)\n  -l           maybe lower (int < 10)"
         "\n  -m           less than 10 (int < 10)\n  -b           binary with re (binary re: m)\n  -g           binary with re (binary re: m)\n  -t           string with re (string re: m)"
-        "\n  ---maybe-req maybe required int (int)\n  -y, --yyy    string with re (string re: m)\n  -u           string choices (choice: 12)\n  -c           tough choice (choice: 1, 2, 3)"
+        "\n  ---maybe-req maybe required int (int)\n  -y, --yyy    string with re (string re: m)\n  -u           string choices (choice: 1, 2)\n  -c           tough choice (choice: 1, 2, 3)"
         "\n  -q           floating choice (choice: 2.10000, 1.20000)\n  -foobar      foobaring option\n  -r           recursive\n  -f, --force  force\n  -v           verbosity level"
         "\n  -i           interval set (int > 1)\n  --req        required optional, right?\n  --float      floating-point long form argument (float, 3.14)\n",
     ?assertEqual(Usage, argparse:help(Cmd, #{command => ["start"]})),
