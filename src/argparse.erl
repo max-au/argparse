@@ -745,6 +745,14 @@ convert_type(atom, Arg, Opt, Eos) ->
     end;
 convert_type({atom, unsafe}, Arg, _Opt, _Eos) ->
     list_to_atom(Arg);
+convert_type({atom, Choices}, Arg, Opt, Eos) ->
+    try
+        Atom = list_to_existing_atom(Arg),
+        lists:member(Atom, Choices) orelse fail({invalid_argument, Eos#eos.commands, Opt, Arg}),
+        Atom
+    catch error:badarg ->
+        fail({invalid_argument, Eos#eos.commands, Opt, Arg})
+    end;
 convert_type({custom, Fun}, Arg, Opt, Eos) ->
     try Fun(Arg)
     catch error:invalid_argument ->
@@ -971,6 +979,9 @@ validate_type({int, Opts}, Path, #{name := Name}) ->
     [fail({invalid_option, clean_path(Path), Name, type, "invalid validator"})
         || {Kind, Val} <- Opts, (Kind =/= min andalso Kind =/= max) orelse (not is_integer(Val))],
     {int, Opts};
+validate_type({atom, Choices} = Valid, Path, #{name := Name}) when is_list(Choices) ->
+    [fail({invalid_option, clean_path(Path), Name, type, "unsupported"}) || C <- Choices, not is_atom(C)],
+    Valid;
 validate_type({string, Re} = Valid, _Path, _Opt) when is_list(Re) ->
     Valid;
 validate_type({string, Re, L} = Valid, _Path, _Opt) when is_list(Re), is_list(L) ->
@@ -1214,11 +1225,11 @@ format_type(#{type := {Num, Valid}}) when Num =:= int; Num =:= float ->
         {undefined, undefined} ->
             io_lib:format("~s", [Num]);
         {Min, undefined} ->
-            io_lib:format("~s > ~tp", [Num, Min]);
+            io_lib:format("~s >= ~tp", [Num, Min]);
         {undefined, Max} ->
-            io_lib:format("~s < ~tp", [Num, Max]);
+            io_lib:format("~s <= ~tp", [Num, Max]);
         {Min, Max} ->
-            io_lib:format("~tp < ~s < ~tp", [Min, Num, Max])
+            io_lib:format("~tp <= ~s <= ~tp", [Min, Num, Max])
     end;
 format_type(#{type := {string, Re, _}}) when is_list(Re), not is_list(hd(Re)) ->
     io_lib:format("string re: ~ts", [Re]);
@@ -1230,6 +1241,8 @@ format_type(#{type := {binary, Re, _}}) when is_binary(Re) ->
     io_lib:format("binary re: ~ts", [Re]);
 format_type(#{type := {StrBin, Choices}}) when StrBin =:= string orelse StrBin =:= binary, is_list(Choices) ->
     io_lib:format("choice: ~ts", [lists:join(", ", Choices)]);
+format_type(#{type := {atom, Choices}}) ->
+    io_lib:format("choice: ~ts", [lists:join(", ", [atom_to_list(C) || C <- Choices])]);
 format_type(#{type := boolean}) ->
     "";
 format_type(#{type := Type}) when is_atom(Type) ->

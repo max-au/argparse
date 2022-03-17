@@ -80,7 +80,7 @@ run(Args) ->
     help => boolean(),
     error => ok | error | halt | {halt, non_neg_integer()},
     prefixes => [integer()],%% prefixes passed to argparse
-    progname => string()    %% specifies executable name instead of 'erl'
+    progname => string() | atom()   %% specifies executable name instead of 'erl'
 }.
 
 %% @doc CLI entry point, parses arguments and executes selected function.
