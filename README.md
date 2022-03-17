@@ -198,9 +198,12 @@ To be considered after 1.2.0:
 
 ## Changelog
 
+Verson 1.2.1:
+ * minor bugfixes, support for choices of atoms
+
 Version 1.2.0:
-* CLI incompatible change: `cli:run/1,2` by default now calls halt(1) in case of a parser error
-* bugfixes
+ * CLI incompatible change: `cli:run/1,2` by default now calls halt(1) in case of a parser error
+ * bugfixes
 
 Version 1.1.3:
  * added `help => hidden` for commands and options
