@@ -121,3 +121,5 @@ to provide correct help/usage line:
 
 cli is able to pass **prefixes** option to argparse (this also changes *-h* and *--help*
 prefix). There are also additional options to explore, see `cli:run/2` function reference.
+
+cli also passes **default** option to argparse.

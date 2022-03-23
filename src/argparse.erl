@@ -215,7 +215,9 @@
     short = #{} :: #{integer() => argument()},
     long = #{} :: #{string() => argument()},
     %% flag, whether there are no options that can be confused with negative numbers
-    no_digits = true :: boolean()
+    no_digits = true :: boolean(),
+    %% global default for not required arguments
+    default :: error | {ok, term()}
 }).
 
 %% Error Reason thrown by parser (feed it into format_error to get human-readable error).
@@ -230,6 +232,8 @@
 -type parser_options() :: #{
     %% allowed prefixes (default is [$-]).
     prefixes => [integer()],
+    %% default value for all missing not required arguments
+    default => term(),
     %% next fields are only considered when printing usage
     progname => string() | atom(),   %% program name override
     command => [string()]   %% nested command (missing/empty for top-level command)
@@ -265,7 +269,8 @@ parse(Args, Command) ->
 parse(Args, Command, Options) ->
     {Prog, Cmd} = validate(Command, Options),
     Prefixes = maps:from_list([{P, true} || P <- maps:get(prefixes, Options, [$-])]),
-    parse_impl(Args, merge_arguments(Prog, Cmd, #eos{prefixes = Prefixes, current = Cmd})).
+    parse_impl(Args, merge_arguments(Prog, Cmd, #eos{prefixes = Prefixes, current = Cmd,
+        default = maps:find(default, Options)})).
 
 %% By default, options are indented with 2 spaces for each level of
 %%  sub-command.
@@ -398,16 +403,16 @@ parse_impl([Positional | Tail], Eos) ->
 
 %% Entire command line has been matched, go over missing arguments,
 %%  add defaults etc
-parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, pos = Pos} = Eos) ->
+parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, pos = Pos, default = Def} = Eos) ->
     %% error if stopped at sub-command with no handler
     map_size(maps:get(commands, Current, #{})) >0 andalso
         (not is_map_key(handler, Current)) andalso
         fail({missing_argument, Commands, "missing handler"}),
     %% go over remaining positional, verify they are all not required
-    ArgMap1 = fold_args_map(Commands, true, ArgMap0, Pos),
+    ArgMap1 = fold_args_map(Commands, true, ArgMap0, Pos, Def),
     %% go over optionals, and either raise an error, or set default
-    ArgMap2 = fold_args_map(Commands, false, ArgMap1, maps:values(Eos#eos.short)),
-    ArgMap3 = fold_args_map(Commands, false, ArgMap2, maps:values(Eos#eos.long)),
+    ArgMap2 = fold_args_map(Commands, false, ArgMap1, maps:values(Eos#eos.short), Def),
+    ArgMap3 = fold_args_map(Commands, false, ArgMap2, maps:values(Eos#eos.long), Def),
     case Eos#eos.commands of
         [_] ->
             %% if there were no commands specified, only the argument map
@@ -420,7 +425,7 @@ parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, po
 
 %% Generate error for missing required argument, and supply defaults for
 %%  missing optional arguments that have defaults.
-fold_args_map(Commands, Req, ArgMap, Args) ->
+fold_args_map(Commands, Req, ArgMap, Args, GlobalDefault) ->
     lists:foldl(
         fun (#{name := Name}, Acc) when is_map_key(Name, Acc) ->
                 %% argument present
@@ -431,9 +436,9 @@ fold_args_map(Commands, Req, ArgMap, Args) ->
             (#{name := Name, required := false, default := Default}, Acc) ->
                 %% explicitly not required argument with default
                 Acc#{Name => Default};
-            (#{required := false}, Acc) ->
-                %% explicitly not required argument with no default - just skip
-                Acc;
+            (#{name := Name, required := false}, Acc) ->
+                %% explicitly not required with no local default, try global one
+                try_global_default(Name, Acc, GlobalDefault);
             (#{name := Name, default := Default}, Acc) when Req =:= true ->
                 %% positional argument with default
                 Acc#{Name => Default};
@@ -443,10 +448,15 @@ fold_args_map(Commands, Req, ArgMap, Args) ->
             (#{name := Name, default := Default}, Acc) ->
                 %% missing, optional, and there is a default
                 Acc#{Name => Default};
-            (_Opt, Acc) ->
-                %% missing, optional, no default - don't populate
-                Acc
+            (#{name := Name}, Acc) ->
+                %% missing, optional, no local default, try global default
+                try_global_default(Name, Acc, GlobalDefault)
         end, ArgMap, Args).
+
+try_global_default(_Name, Acc, error) ->
+    Acc;
+try_global_default(Name, Acc, {ok, Term}) ->
+    Acc#{Name => Term}.
 
 %%--------------------------------------------------------------------
 %% argument consumption (nargs) handling
