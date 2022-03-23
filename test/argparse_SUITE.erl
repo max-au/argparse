@@ -20,6 +20,7 @@
     negative/0, negative/1,
     nodigits/0, nodigits/1,
     python_issue_15112/0, python_issue_15112/1,
+    default_for_not_required/0, default_for_not_required/1,
     type_validators/0, type_validators/1,
     error_format/0, error_format/1,
     subcommand/0, subcommand/1,
@@ -44,7 +45,7 @@ suite() ->
 groups() ->
     [{parallel, [parallel], [
         basic, long_form_eq, single_arg_built_in_types, complex_command, errors,
-        unicode, args, argparse, negative, proxy_arguments,
+        unicode, args, argparse, negative, proxy_arguments, default_for_not_required,
         nodigits,  python_issue_15112, type_validators, subcommand, error_format,
         very_short, multi_short, usage, readme, error_usage, meta, usage_template
     ]}].
@@ -582,6 +583,13 @@ python_issue_15112(Config) when is_list(Config) ->
     ]},
     ?assertEqual(#{pos => "1", foo => "2", spam => 8, vars => ["8", "9"]},
         parse("1 2 --spam 8 8 9", Parser)).
+
+default_for_not_required() ->
+    [{doc, "Tests that default value is used for non-required positional argument"}].
+
+default_for_not_required(Config) when is_list(Config) ->
+    ?assertEqual(#{def => 1}, parse("", #{arguments => [#{name => def, short => $d, required => false, default => 1}]})),
+    ?assertEqual(#{def => 1}, parse("", #{arguments => [#{name => def, required => false, default => 1}]})).
 
 subcommand() ->
     [{doc, "Tests subcommands parser"}].

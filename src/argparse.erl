@@ -422,12 +422,18 @@ parse_impl([], #eos{argmap = ArgMap0, commands = Commands, current = Current, po
 %%  missing optional arguments that have defaults.
 fold_args_map(Commands, Req, ArgMap, Args) ->
     lists:foldl(
-        fun (#{name := Name} = Opt, Acc) when is_map_key(Name, Acc); map_get(required, Opt) =:= false ->
-                %% argument present, or explicitly not required
+        fun (#{name := Name}, Acc) when is_map_key(Name, Acc) ->
+                %% argument present
                 Acc;
             (#{name := Name, required := true}, _Acc) ->
                 %% missing, and required explicitly
                 fail({missing_argument, Commands, Name});
+            (#{name := Name, required := false, default := Default}, Acc) ->
+                %% explicitly not required argument with default
+                Acc#{Name => Default};
+            (#{required := false}, Acc) ->
+                %% explicitly not required argument with no default - just skip
+                Acc;
             (#{name := Name, default := Default}, Acc) when Req =:= true ->
                 %% positional argument with default
                 Acc#{Name => Default};
