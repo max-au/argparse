@@ -27,6 +27,7 @@
     multi_module/0, multi_module/1,
     warnings/0, warnings/1,
     simple/0, simple/1,
+    global_default/0, global_default/1,
     malformed_behaviour/0, malformed_behaviour/1,
     exit_code/0, exit_code/1
 ]).
@@ -48,7 +49,7 @@ suite() ->
 
 all() ->
     [test_cli, auto_help, subcmd_help, missing_handler, bare_cli, multi_module, warnings,
-        malformed_behaviour, exit_code].
+        malformed_behaviour, exit_code, global_default].
 
 %%--------------------------------------------------------------------
 %% Helpers
@@ -324,6 +325,17 @@ simple(Config) when is_list(Config) ->
     {ok, IO} = capture_output(fun () -> cli:run(["4"], #{modules => simple, error => ok}) end),
     ct:pal("~s", [IO]),
     ?assertEqual("Removing 4 (force: false, recursive: false)\n", IO).
+
+global_default() ->
+    [{doc, "Verifies that global default for maps works"}].
+
+global_default(Config) when is_list(Config) ->
+    CliRet = "#{arguments => [#{name => foo, short => $f}, #{name => bar, short => $b, default => \"1\"}]}",
+    FunExport = "cli/1",
+    FunDefs = "cli(#{foo := Foo, bar := Bar}) -> io:format(\"Foo ~s, bar ~s~n\", [Foo, Bar]).",
+    cli_module(simple, CliRet, FunExport, [FunDefs]),
+    {ok, IO} = capture_output(fun () -> cli:run([], #{modules => simple, error => ok, default => undefined}) end),
+    ?assertEqual("Foo undefined, bar 1\n", IO).
 
 malformed_behaviour() ->
     [{doc, "Tests for cli/0 callback returning invalid command map"}].

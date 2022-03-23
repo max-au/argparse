@@ -199,6 +199,10 @@ To be considered after 1.2.0:
 ## Changelog
 
 Verson 1.2.1:
+ * implemented global default
+ * minor bugfixes
+
+Verson 1.2.1:
  * minor bugfixes, support for choices of atoms
 
 Version 1.2.0:

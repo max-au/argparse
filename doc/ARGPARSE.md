@@ -19,6 +19,14 @@ To override default optional argument prefix (**-**), use **prefixes** option:
     3> argparse:parse(["+sbwt"], #{arguments => [#{name => mode, short => $s}]}, #{prefixes => "+"}).
     #{mode => "bwt"}
 
+To define a global default for arguments that are not required, use **default** option:
+
+    4> argparse:parse([], #{arguments => [#{name => mode, required => false}]}, #{default => undef}).
+    #{mode => undef}
+
+When global default is not set, resulting argument map does not include keys for arguments
+that are not specified in the command line and there is no locally defined default value.
+
 ## Validation, help & usage information
 
 Function ```validate/1``` may be used to validate command with all sub-commands
@@ -40,8 +48,9 @@ argument names to their values:
 
 This map contains all arguments matching command line passed, initialised with
 corresponding values. If argument is omitted, but default value is specified for it,
-it is added to the map. When no default value specified, and argument is not
-present, corresponding key is not present in the map.
+it is added to the map. When no local default value specified, and argument is not
+present, corresponding key is not present in the map, unless there is a global default
+passed with `parse/3` options.
 
 Missing required (field **required** is set to true for optional arguments,
 or missing for positional) arguments raises an error.

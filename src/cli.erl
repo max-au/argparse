@@ -80,6 +80,8 @@ run(Args) ->
     help => boolean(),
     error => ok | error | halt | {halt, non_neg_integer()},
     prefixes => [integer()],%% prefixes passed to argparse
+    %% default value for all missing not required arguments
+    default => term(),
     progname => string() | atom()   %% specifies executable name instead of 'erl'
 }.
 
