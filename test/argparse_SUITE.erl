@@ -106,6 +106,8 @@ ubiq_cmd() ->
                     #{name => choice, short => $c, type => {int, [1,2,3]}, help => "tough choice"},
                     #{name => fc, short => $q, type => {float, [2.1,1.2]}, help => "floating choice"},
                     #{name => ac, short => $w, type => {atom, [one, two]}, help => "atom choice"},
+                    #{name => au, long => "-unsafe", type => {atom, unsafe}, help => "unsafe atom"},
+                    #{name => as, long => "-safe", type => atom, help => "safe atom"},
                     #{name => name, required => false, nargs => list, help => hidden},
                     #{name => long, long => "foobar", required => false, help => "foobaring option"}
                 ], commands => #{
@@ -275,9 +277,12 @@ type_validators(Config) when is_list(Config) ->
         parse_opts("5", [#{name => bin, type => binary}])),
     ?assertEqual(#{str => "011"},
         parse_opts("11", [#{name => str, type => {custom, fun(S) -> [$0|S] end}}])),
-    %% funny non-atom-atom
+    %% %% funny non-atom-atom: ensure the atom does not exist
+    ?assertException(error, badarg, list_to_existing_atom("$can_never_be")),
     ArgMap = parse_opts("$can_never_be", [#{name => atom, type => {atom, unsafe}}]),
-    ?assert(is_map_key(atom, ArgMap)), %% must be successful, but really we can't create an atom in code!
+    argparse:validate(#{arguments => [#{name => atom, type => {atom, unsafe}}]}),
+    %% must be successful, but really we can't create an atom in code!
+    ?assertEqual(list_to_existing_atom("$can_never_be"), maps:get(atom, ArgMap)),
     %% choices: exceptions
     ?assertException(error, {argparse, {invalid_argument, Prog, bin, "K"}},
         parse_opts("K", [#{name => bin, type => {binary, [<<"M">>, <<"N">>]}}])),
@@ -729,12 +734,13 @@ usage() ->
 usage(Config) when is_list(Config) ->
     Cmd = ubiq_cmd(),
     Usage = "usage: " ++ prog() ++ " start {crawler|doze} [-lrfv] [-s <shard>...] [-z <z>] [-m <more>] [-b <bin>] [-g <g>] [-t <t>] ---maybe-req -y <y>"
-        " --yyy <y> [-u <u>] [-c <choice>] [-q <fc>] [-w <ac>] [-foobar <long>] [--force] [-i <interval>] [--req <weird>] [--float <float>] <server> [<optpos>]"
+        " --yyy <y> [-u <u>] [-c <choice>] [-q <fc>] [-w <ac>] [--unsafe <au>] [--safe <as>] [-foobar <long>] [--force] [-i <interval>] [--req <weird>] [--float <float>] <server> [<optpos>]"
         "\n\nSubcommands:\n  crawler      controls crawler behaviour\n  doze         dozes a bit\n\nArguments:\n  server       server to start\n  optpos       optional positional (int)"
         "\n\nOptional arguments:\n  -s           initial shards (int)\n  -z           between (1 <= int <= 10)\n  -l           maybe lower (int <= 10)"
         "\n  -m           less than 10 (int <= 10)\n  -b           binary with re (binary re: m)\n  -g           binary with re (binary re: m)\n  -t           string with re (string re: m)"
         "\n  ---maybe-req maybe required int (int)\n  -y, --yyy    string with re (string re: m)\n  -u           string choices (choice: 1, 2)\n  -c           tough choice (choice: 1, 2, 3)"
-        "\n  -q           floating choice (choice: 2.10000, 1.20000)\n  -w           atom choice (choice: one, two)\n  -foobar      foobaring option\n  -r           recursive\n  -f, --force  force\n  -v           verbosity level"
+        "\n  -q           floating choice (choice: 2.10000, 1.20000)\n  -w           atom choice (choice: one, two)\n  --unsafe     unsafe atom (atom)\n  --safe       safe atom (existing atom)"
+        "\n  -foobar      foobaring option\n  -r           recursive\n  -f, --force  force\n  -v           verbosity level"
         "\n  -i           interval set (int >= 1)\n  --req        required optional, right?\n  --float      floating-point long form argument (float, 3.14)\n",
     ?assertEqual(Usage, argparse:help(Cmd, #{command => ["start"]})),
     FullCmd = "usage: " ++ prog() ++ " <command> [-rfv] [--force] [-i <interval>] [--req <weird>] [--float <float>]\n\nSubcommands:\n  start       verifies configuration and starts server"
