@@ -198,7 +198,7 @@ To be considered after 1.2.0:
 
 ## Changelog
 
-Verson 1.2.1:
+Verson 1.2.3:
  * implemented global default
  * minor bugfixes
 
