@@ -239,18 +239,18 @@
     command => [string()]   %% nested command (missing/empty for top-level command)
 }.
 
--type command_spec() :: {Name :: string(), command()}. %% Command name with command spec
+-type command_spec() :: {Name :: [string()], command()}. %% Command name with command spec
 
 -type parse_result() :: arg_map() | {arg_map(), command_spec()}. %% Result returned from parse/2,3: can be only argument map,  or argument map with command_spec.
 
 %% @equiv validate(Command, #{})
--spec validate(command()) -> command_spec().
+-spec validate(command()) -> {Progname :: string(), command()}.
 validate(Command) ->
     validate(Command, #{}).
 
 %% @doc Validate command specification, taking Options into account.
 %% Generates error signal when command specification is invalid.
--spec validate(command(), parser_options()) -> command_spec().
+-spec validate(command(), parser_options()) -> {Progname :: string(), command()}.
 validate(Command, Options) ->
     validate_impl(Command, Options).
 

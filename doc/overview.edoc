@@ -1,6 +1,6 @@
  ** this is the overview.doc file for the application 'argparse' **
 
-   @version 1.2.3
+   @version 1.2.4
    @author Maxim Fedorov, <maximfca@gmail.com>
    @title argparse: A simple framework to create complex CLI.
 
