@@ -198,14 +198,14 @@ To be considered after 1.2.0:
 
 ## Changelog
 
-Verson 1.2.4:
+Version 1.2.4:
  * minor spec fixes
 
-Verson 1.2.3:
+Version 1.2.3:
  * implemented global default
  * minor bugfixes
 
-Verson 1.2.1:
+Version 1.2.1:
  * minor bugfixes, support for choices of atoms
 
 Version 1.2.0:
