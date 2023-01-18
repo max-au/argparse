@@ -36,7 +36,7 @@ Implementing a utility with a single command to run requires:
         io:format("Removing ~s (force ~s, recursive: ~s)~n",
             [Dir, Force, Recursive]).
 
-## rebar3 escript [example](examples/conf_reader)
+## rebar3 escript [example](https://github.com/max-au/argparse/tree/master/doc/examples/conf_reader)
 Creating a new application exposing CLI is as simple as:
 1. Running `rebar3 new escript conf_reader`
 2. Adding `argparse` to `deps` and `escript_incl_apps` in rebar.config
