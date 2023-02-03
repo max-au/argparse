@@ -1,5 +1,7 @@
 # argparse: command line parser for Erlang
 
+[![Build Status](https://github.com/max-au/argparse/actions/workflows/erlang.yml/badge.svg?branch=master)](https://github.com/max-au/argparse/actions) [![Hex.pm](https://img.shields.io/hexpm/v/argparse.svg)](https://hex.pm/packages/argparse) [![Hex Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/argparse)
+
 A mini-framework to create complex cli. Inspired by Python argparse.
 
 Follows conventions of  Unix Utility Argument Syntax.
