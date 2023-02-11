@@ -73,7 +73,7 @@ Command definitions:
             commands => #{
                 "sum" => #{
                     arguments => [
-                        #{name => num, nargs => nonempty_list, type => int, help => "Numbers to sum"}
+                        #{name => num, nargs => nonempty_list, type => integer, help => "Numbers to sum"}
                     ]
                 },
                 "math" => #{
@@ -88,8 +88,8 @@ Command definitions:
                 },
                 "mul" => #{
                     arguments => [
-                        #{name => left, type => int},
-                        #{name => right, type => int}
+                        #{name => left, type => integer},
+                        #{name => right, type => integer}
                     ]
                 }
             }

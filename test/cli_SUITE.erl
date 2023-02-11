@@ -130,7 +130,7 @@ cli_module(Mod, CliRet, FunExport, FunDefs) ->
 
 cli_module(Mod, Calc) ->
     CliRet = lists:flatten(
-        io_lib:format("#{commands => #{\"~s\" => #{arguments => [#{name => arg, nargs => list, type => int}]}}}", [Mod])),
+        io_lib:format("#{commands => #{\"~s\" => #{arguments => [#{name => arg, nargs => list, type => integer}]}}}", [Mod])),
     FunExport = lists:flatten(io_lib:format("~s/1", [Mod])),
     FunDefs = lists:flatten(
         io_lib:format("~s(#{arg := Args}) -> ~s(Args).", [Mod, Calc])),
@@ -147,7 +147,7 @@ cli() ->
                 help => "Sums a list of arguments",
                 handler => fun (#{num := Nums}) -> lists:sum(Nums) end,
                 arguments => [
-                    #{name => num, nargs => nonempty_list, type => int, help => "Numbers to sum"}
+                    #{name => num, nargs => nonempty_list, type => integer, help => "Numbers to sum"}
                 ]
             },
             "math" => #{
@@ -163,8 +163,8 @@ cli() ->
             "mul" => #{
                 help => "Multiplies two arguments",
                 arguments => [
-                    #{name => left, type => int},
-                    #{name => right, type => int}
+                    #{name => left, type => integer},
+                    #{name => right, type => integer}
                 ]
             }
         }
@@ -193,7 +193,7 @@ test_cli(Config) when is_list(Config) ->
     ?assertEqual(4, cli:run(["sum", "2", "2"])),
     ?assertEqual(6, cli:run(["sum", "3", "3"], #{modules => ?MODULE})),
     ?assertEqual(6, cli:run(["sum", "3", "3"], #{modules => [?MODULE]})),
-    Expected = "error: erm sum: required argument missing: num\nusage: erm",
+    Expected = "error: erm sum: required argument missing: num\nUsage:\n  erm",
     {ok, Actual} = capture_output(fun () -> cli:run(["sum"], #{progname => "erm", error => ok}) end),
     ?assertEqual(Expected, lists:sublist(Actual, length(Expected))),
     %% test when help => false
@@ -209,32 +209,33 @@ auto_help() ->
 
 auto_help(Config) when is_list(Config) ->
     erlang:system_flag(backtrace_depth, 42),
-    Expected = "usage: erm  {math|mul|sum}\n\nSubcommands:\n  math \n  mul"
+    Expected = "Usage:\n  erm {math|mul|sum}\n\nSubcommands:\n  math \n  mul"
         "  Multiplies two arguments\n  sum  Sums a list of arguments\n",
     ?assertEqual({ok, Expected}, capture_output(fun () -> cli:run(["--help"], #{progname => "erm", error => ok}) end)),
     %% add more modules
     cli_module(auto_help, "#{help => \"description\"}", undefined, []),
-    Expected1 = "usage: erm  {math|mul|sum}\ndescription\n\nSubcommands:\n  math"
+    Expected1 = "Usage:\n  erm {math|mul|sum}\n\ndescription\n\nSubcommands:\n  math"
         " \n  mul  Multiplies two arguments\n  sum  Sums a list of arguments\n",
     ?assertEqual({ok, Expected1}, capture_output(fun () -> cli:run(["-h"], #{progname => "erm",
         modules => [?MODULE, auto_help], error => ok}) end)),
     %% request help for a subcommand
-    Expected2 = "usage: " ++ prog() ++ " math {cos|extra|sin} <in>\n\nSubcommands:\n  cos   "
+    Expected2 = "Usage:\n  " ++ prog() ++ " math {cos|extra|sin} <in>\n\nSubcommands:\n  cos   "
         "Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected2}, capture_output(fun () -> cli:run(["math", "--help"],
         #{modules => [?MODULE], error => ok}) end)),
     %% request help for a sub-subcommand
-    Expected3 = "usage: " ++ prog() ++ " math extra {fail|ok} <in>\n\nSubcommands:\n  fail \n"
+    Expected3 = "Usage:\n  " ++ prog() ++ " math extra {fail|ok} <in>\n\nSubcommands:\n  fail \n"
         "  ok   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected3}, capture_output(fun () -> cli:run(["math", "extra", "--help"],
         #{modules => ?MODULE, error => ok}) end)),
     %% request help for a sub-sub-subcommand
-    Expected4 = "usage: " ++ prog() ++ " math cos <in>\n\nArguments:\n  in Input value (float)\n",
+    Expected4 = "Usage:\n  " ++ prog() ++ " math cos <in>\n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected4}, capture_output(fun () -> cli:run(["math", "cos", "--help"],
         #{modules => ?MODULE, error => ok}) end)),
     %% request help in a really wrong way (subcommand does not exist)
     Expected5 =
-        "error: " ++ prog() ++ " math: invalid argument bad for: in\nusage: " ++ prog() ++ " math {cos|extra|sin} <in>\n\nSubcommands:\n"
+        "error: " ++ prog() ++ " math: invalid argument for in: bad is not a number\nUsage:\n  " ++
+        prog() ++ " math {cos|extra|sin} <in>\n\nSubcommands:\n"
         "  cos   Calculates cosinus\n  extra \n  sin   \n\nArguments:\n  in Input value (float)\n",
     ?assertEqual({ok, Expected5}, capture_output(fun () -> cli:run(["math", "bad", "--help"],
         #{modules => ?MODULE, error => ok}) end)).
@@ -247,13 +248,13 @@ subcmd_help(Config) when is_list(Config) ->
     cli_module(empty, CliRet, undefined, []),
     %% capture good help output
     {_Ret, IO} = capture_output(fun () -> cli:run(["foo", "--help"], #{modules => empty, error => ok}) end),
-    ?assertEqual("usage: " ++ prog() ++ " foo <left>\n\nArguments:\n  left lefty\n", IO),
+    ?assertEqual("Usage:\n  " ++ prog() ++ " foo <left>\n\nArguments:\n  left lefty\n", IO),
     %% capture global help output
     {_Ret1, IO1} = capture_output(fun () -> cli:run(["--help"], #{modules => empty, error => ok}) end),
-    ?assertEqual("usage: " ++ prog() ++ "  {foo}\n\nSubcommands:\n  foo myfoo\n", IO1),
+    ?assertEqual("Usage:\n  " ++ prog() ++ " {foo}\n\nSubcommands:\n  foo myfoo\n", IO1),
     %% capture broken help output
     {_Ret2, IO2} = capture_output(fun () -> cli:run(["mycool", "--help"], #{modules => [empty], error => ok}) end),
-    ?assertEqual("error: " ++ prog() ++ ": unrecognised argument: mycool\nusage: " ++ prog() ++ "  {foo}\n\nSubcommands:\n  foo myfoo\n", IO2),
+    ?assertEqual("error: " ++ prog() ++ ": unknown argument: mycool\nUsage:\n  " ++ prog() ++ " {foo}\n\nSubcommands:\n  foo myfoo\n", IO2),
     ct:pal("~s", [IO]).
 
 missing_handler() ->
@@ -271,7 +272,7 @@ bare_cli() ->
     [{doc, "Bare cli, no sub-commands"}].
 
 bare_cli(Config) when is_list(Config) ->
-    CliRet = "#{arguments => [#{name => arg, nargs => list, type => int}]}",
+    CliRet = "#{arguments => [#{name => arg, nargs => list, type => integer}]}",
     FunExport = "cli/1",
     FunDefs = "cli(#{arg := Args}) -> lists:sum(Args).",
     cli_module(bare, CliRet, FunExport, [FunDefs]),
@@ -280,7 +281,7 @@ bare_cli(Config) when is_list(Config) ->
     ?assertEqual(11, Ret),
     %% check usage/help working, and not starting with "error: "
     cli_module(bad, "#{arguments => [#{name => arg, short => $s}]}", "none/0", ["none() -> ok."]),
-    Expected = "usage: ",
+    Expected = "Usage:\n",
     {ok, Usage} = capture_output(fun () -> cli:run([], #{modules => bad, error => ok}) end),
     ?assertEqual(Expected, lists:sublist(Usage, length(Expected))).
 
@@ -298,12 +299,12 @@ warnings() ->
 
 warnings(Config) when is_list(Config) ->
     {ok, IO} = capture_output(fun () -> cli:run(["sum"], #{modules => nomodule, error => ok}) end),
-    ?assertNotEqual(nomatch, string:find(IO, "unrecognised argument: sum")),
+    ?assertNotEqual(nomatch, string:find(IO, "unknown argument: sum")),
     %% ensure log line added
     {ok, IO, Log} = capture_output_and_log(fun () -> cli:run(["sum"], #{modules => nomodule, error => ok}) end),
     [#{level := Lvl, msg := {Fmt, _}}] = Log,
     ?assertEqual(warning, Lvl),
-    ?assertEqual("Error calling ~s:cli(): ~s:~p~n~p", Fmt),
+    ?assertEqual("Error calling ~ts:cli(): ~ts:~p~n~p", Fmt),
     %% ensure no log line added when suppression is requested
     cli_module(warn, "#{commands => #{\"sum\" => #{}}}", undefined, []),
     {Sum, SumText, LogZero} = capture_output_and_log(fun () -> cli:run(["sum", "0"],
@@ -345,9 +346,9 @@ malformed_behaviour(Config) when is_list(Config) ->
     FunExport = "cli/1", FunDefs = "cli(#{arg := Args}) -> lists:sum(Args).",
     cli_module(malformed, CliRet, FunExport, [FunDefs]),
     {ok, IO, Log} = capture_output_and_log(fun () -> cli:run(["4"], #{modules => malformed, error => ok}) end),
-    ?assertEqual("error: " ++ prog() ++ ": unrecognised argument: 4\nusage: " ++ prog() ++ "\n", IO),
+    ?assertEqual("error: " ++ prog() ++ ": unknown argument: 4\nUsage:\n  " ++ prog() ++ "\n", IO),
     [#{level := Lvl, msg := {Fmt, _Args}}] = Log,
-    ?assertEqual("Error calling ~s:cli(): ~s:~p~n~p", Fmt),
+    ?assertEqual("Error calling ~ts:cli(): ~ts:~p~n~p", Fmt),
     ?assertEqual(warning, Lvl).
 
 exit_code() ->

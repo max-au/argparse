@@ -75,14 +75,14 @@ run(Args) ->
 %% `help' set to false suppresses printing `usage' when parser produces
 %%      an error, and disables default --help/-h behaviour
 -type run_options() :: #{
-    modules => all_loaded | module() | [module()],
-    warn => suppress | warn,
-    help => boolean(),
-    error => ok | error | halt | {halt, non_neg_integer()},
+    modules => all_loaded | module() | [module()], %% CLI specific
+    warn => suppress | warn, %% CLI specific
+    help => boolean(), %% CLI specific
+    error => ok | error | halt | {halt, non_neg_integer()}, %% CLI-specific
+    %% options below are passed to argparse
     prefixes => [integer()],%% prefixes passed to argparse
-    %% default value for all missing not required arguments
-    default => term(),
-    progname => string() | atom()   %% specifies executable name instead of 'erl'
+    default => term(), %% default value for all missing not required arguments
+    progname => string() | atom() | binary() %% specifies executable name instead of 'erl'
 }.
 
 %% @doc CLI entry point, parses arguments and executes selected function.
@@ -127,10 +127,10 @@ discover_commands(Modules, Options) ->
     lists:foldl(
         fun (Mod, Cmds) ->
             ModCmd =
-                try {_, MCmd} = argparse:validate(Mod:cli(), Options), MCmd
+                try MCmd = Mod:cli(), argparse:validate(MCmd, Options), MCmd
                 catch
                     Class:Reason:Stack when Warn =:= warn ->
-                        ?LOG_WARNING("Error calling ~s:cli(): ~s:~p~n~p",
+                        ?LOG_WARNING("Error calling ~ts:cli(): ~ts:~p~n~p",
                             [Mod, Class, Reason, Stack]), #{};
                         _:_ when Warn =:= suppress ->
                             #{}
@@ -167,55 +167,56 @@ dispatch(Args, CmdMap, Modules, Options) ->
     HelpEnabled = maps:get(help, Options, true),
     %% attempt to dispatch the command
     try argparse:parse(Args, CmdMap, Options) of
-        {ArgMap, PathTo} ->
-            run_handler(CmdMap, ArgMap, PathTo, undefined);
-        ArgMap ->
-            %{ maps:find(default, Options), Modules, Options}
-            run_handler(CmdMap, ArgMap, {[], CmdMap}, {Modules, Options})
-    catch
-        error:{argparse, Reason} when HelpEnabled =:= false ->
-            io:format("error: ~s", [argparse:format_error(Reason)]),
-            dispatch_error(Options, Reason);
-        error:{argparse, Reason} ->
+        {ok, ArgMap, Path, Command} ->
+            run_handler(CmdMap, ArgMap, tl(Path), Command, {Modules, Options});
+        {error, Reason} when HelpEnabled =:= false ->
+            io:format("error: ~ts~n", [argparse:format_error(Reason)]),
+            dispatch_error(maps:find(error, Options), Reason);
+        {error, Reason} ->
             %% see if it was cry for help that triggered error message
             Prefixes = maps:get(prefixes, Options, "-"),
             case help_requested(Reason, Prefixes) of
                 false ->
-                    Fmt = argparse:format_error(Reason, CmdMap, Options),
-                    io:format("error: ~s", [Fmt]);
+                    io:format("error: ~ts~n", [argparse:format_error(Reason)]),
+                    io:format("~ts", [argparse:help(CmdMap, Options#{command => tl(element(1, Reason))})]);
                 CmdPath ->
                     Fmt = argparse:help(CmdMap, Options#{command => tl(CmdPath)}),
-                    io:format("~s", [Fmt])
+                    io:format("~ts", [Fmt])
             end,
-            dispatch_error(Options, Reason)
+            dispatch_error(maps:find(error, Options), Reason)
+    catch
+        error:ValidatorReason:Stack ->
+            %% command validation failed - that is a developer error
+            io:format(erl_error:format_exception(error, ValidatorReason, Stack)),
+            dispatch_error(maps:find(error, Options), ValidatorReason)
     end.
 
-dispatch_error(#{error := ok}, _Reason) ->
+dispatch_error({ok, ok}, _Reason) ->
     ok;
-dispatch_error(#{error := error}, Reason) ->
+dispatch_error({ok, error}, Reason) ->
     error(Reason);
-dispatch_error(#{error := halt}, _Reason) ->
+dispatch_error({ok, halt}, _Reason) ->
     erlang:halt(1);
-dispatch_error(#{error := {halt, Exit}}, _Reason) ->
+dispatch_error({ok, {halt, Exit}}, _Reason) ->
     erlang:halt(Exit);
 %% default is halt(1)
-dispatch_error(_Options, _Reason) ->
+dispatch_error(_Default, _Reason) ->
     erlang:halt(1).
 
 %% Executes handler
-run_handler(CmdMap, ArgMap, {Path, #{handler := {Mod, ModFun, Default}}}, _MO) ->
+run_handler(CmdMap, ArgMap, Path, #{handler := {Mod, ModFun, Default}}, _MO) ->
     ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),
     %% if argument count may not match, better error can be produced
     erlang:apply(Mod, ModFun, ArgList);
-run_handler(_CmdMap, ArgMap, {_Path, #{handler := {Mod, ModFun}}}, _MO) when is_atom(Mod), is_atom(ModFun) ->
+run_handler(_CmdMap, ArgMap, _Path, #{handler := {Mod, ModFun}}, _MO) when is_atom(Mod), is_atom(ModFun) ->
     Mod:ModFun(ArgMap);
-run_handler(CmdMap, ArgMap, {Path, #{handler := {Fun, Default}}}, _MO) when is_function(Fun) ->
+run_handler(CmdMap, ArgMap, Path, #{handler := {Fun, Default}}, _MO) when is_function(Fun) ->
     ArgList = arg_map_to_arg_list(CmdMap, Path, ArgMap, Default),
     %% if argument count may not match, better error can be produced
     erlang:apply(Fun, ArgList);
-run_handler(_CmdMap, ArgMap, {_Path, #{handler := Handler}}, _MO) when is_function(Handler, 1) ->
+run_handler(_CmdMap, ArgMap, _Path, #{handler := Handler}, _MO) when is_function(Handler, 1) ->
     Handler(ArgMap);
-run_handler(CmdMap, ArgMap, {[], _}, {Modules, Options}) ->
+run_handler(CmdMap, ArgMap, [], _Command, {Modules, Options}) ->
     % {undefined, {ok, Default}, Modules, Options}
     exec_cli(Modules, CmdMap, [ArgMap], Options).
 
@@ -255,7 +256,7 @@ merge_commands(Cmds, Mod, Options, Existing) ->
                     Acc#{Name => create_handlers(Mod, Name, Cmd, maps:find(default, Options))};
                 {ok, Another} when Warn =:= warn ->
                     %% do not merge this command, another module already exports it
-                    ?LOG_WARNING("cli: duplicate definition for ~s found, skipping ~P",
+                    ?LOG_WARNING("cli: duplicate definition for ~ts found, skipping ~P",
                         [Name, 8, Another]), Acc;
                 {ok, _Another} when Warn =:= suppress ->
                     %% don't merge duplicate, and don't complain about it
@@ -298,9 +299,9 @@ make_handler(CmdName, Mod, {ok, Default}) ->
     {Mod, list_to_existing_atom(CmdName), Default}.
 
 %% Finds out whether it was --help/-h requested, and exception was thrown due to that
-help_requested({unknown_argument, CmdPath, [Prefix, $h]}, Prefixes) ->
+help_requested({CmdPath, _, [Prefix, $h], _}, Prefixes) ->
     is_prefix(Prefix, Prefixes, CmdPath);
-help_requested({unknown_argument, CmdPath, [Prefix, Prefix, $h, $e, $l, $p]}, Prefixes) ->
+help_requested({CmdPath, _, [Prefix, Prefix, $h, $e, $l, $p], _}, Prefixes) ->
     is_prefix(Prefix, Prefixes, CmdPath);
 help_requested(_, _) ->
     false.
