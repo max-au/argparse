@@ -135,9 +135,9 @@ ubiq_cmd() ->
                     #{name => fc, short => $q, type => {float, [2.1,1.2]}, help => "floating choice"},
                     #{name => ac, short => $w, type => {atom, [one, two]}, help => "atom choice"},
                     #{name => au, long => "-unsafe", type => {atom, unsafe}, help => "unsafe atom"},
-                    #{name => as, long => "-safe", type => atom, help => "safe atom"},
+                    #{name => as, long => "-safe", type => atom, help => <<"safe atom">>},
                     #{name => name, required => false, nargs => list, help => hidden},
-                    #{name => long, long => "foobar", required => false, help => "foobaring option"}
+                    #{name => long, long => "foobar", required => false, help => [<<"foobaring option">>]}
                 ], commands => #{
                     "crawler" => #{arguments => [
                         #{name => extra, long => "--extra", help => "extra option very deep"}
@@ -145,7 +145,7 @@ ubiq_cmd() ->
                         help => "controls crawler behaviour"},
                     "doze" => #{help => "dozes a bit"}}
             },
-            "stop" => #{help => "stops running server", arguments => []
+            "stop" => #{help => <<"stops running server">>, arguments => []
             },
             "status" => #{help => "prints server status", arguments => [],
                 commands => #{
@@ -271,13 +271,13 @@ type_validators(Config) when is_list(Config) ->
         parse_opts("me", [#{name => str, type => {string, "m."}}])),
     ?assertMatch({ok, #{str := "me"}, _, _},
         parse_opts("me", [#{name => str, type => {string, "m.", []}}])),
-    ?assertMatch({ok, #{str := "me"}, _, _},
-        parse_opts("me", [#{name => str, type => {string, "m.", [{capture, none}]}}])),
+    ?assertMatch({ok, #{"str" := "me"}, _, _},
+        parse_opts("me", [#{name => "str", type => {string, "m.", [{capture, none}]}}])),
     %% and binary too...
     ?assertMatch({ok, #{bin := <<"me">>}, _, _},
         parse_opts("me", [#{name => bin, type => {binary, <<"m.">>}}])),
-    ?assertMatch({ok, #{bin := <<"me">>}, _, _},
-        parse_opts("me", [#{name => bin, type => {binary, <<"m.">>, []}}])),
+    ?assertMatch({ok, #{<<"bin">> := <<"me">>}, _, _},
+        parse_opts("me", [#{name => <<"bin">>, type => {binary, <<"m.">>, []}}])),
     ?assertMatch({ok, #{bin := <<"me">>}, _, _},
         parse_opts("me", [#{name => bin, type => {binary, <<"m.">>, [{capture, none}]}}])),
     %% successful integer with range validators
@@ -818,7 +818,7 @@ usage_template(Config) when is_list(Config) ->
         name => shard,
         type => integer,
         default => 0,
-        help => {"[-s SHARD]", ["initial number, ", type, " with a default value of ", default]}}
+        help => {"[-s SHARD]", ["initial number, ", type, <<" with a default value of ">>, default]}}
     ]},
     ?assertEqual("Usage:\n  " ++ prog() ++ " [-s SHARD]\n\nArguments:\n  shard initial number, int with a default value of 0\n",
         unicode:characters_to_list(argparse:help(Cmd, #{}))),
@@ -828,7 +828,7 @@ usage_template(Config) when is_list(Config) ->
         short => $s,
         type => integer,
         default => 0,
-        help => {"[-s SHARD]", ["initial number"]}}
+        help => {<<"[-s SHARD]">>, ["initial number"]}}
     ]},
     ?assertEqual("Usage:\n  " ++ prog() ++ " [-s SHARD]\n\nOptional arguments:\n  -s initial number\n",
         unicode:characters_to_list(argparse:help(Cmd1, #{}))),
@@ -878,7 +878,7 @@ command_usage() ->
 command_usage(Config) when is_list(Config) ->
     Cmd = #{arguments => [
         #{name => arg, help => "argument help"}, #{name => opt, short => $o, help => "option help"}],
-        help => ["Options:\n", options, arguments, "NOTAUSAGE", usage, "\n"]
+        help => ["Options:\n", options, arguments, <<"NOTAUSAGE">>, usage, "\n"]
     },
     ?assertEqual("Options:\n  -o  option help\n  arg argument help\nNOTAUSAGE  " ++ prog() ++ " [-o <opt>] <arg>\n",
         unicode:characters_to_list(argparse:help(Cmd, #{}))).
@@ -895,17 +895,22 @@ usage_width(Config) when is_list(Config) ->
         #{name => q, short => $q, type => boolean}],
         commands => #{
             "cmd1" => #{help => "Help for command number 1, not fitting at all"},
-            "cmd2" => #{help => "Short help"},
+            "cmd2" => #{help => <<"Short help">>},
             "cmd3" => #{help => "Yet another instance of a very long help message"}
         },
-        help => "Very long help line taking much more than 40 characters allowed by the test case"
+        help => "  Very long help line taking much more than 40 characters allowed by the test case.
+Also containing a few newlines.
+
+   Indented new lines must be honoured!"
     },
 
     Expected = "Usage:\n  " ++ prog() ++ " {cmd1|cmd2|cmd3} [-vq] [-o <opt>]\n"
         "      [--option_long_name <opt>] <arg>\n\n"
-        "Very long help line taking much more\n"
+        "  Very long help line taking much more\n"
         "than 40 characters allowed by the test\n"
-        "case\n\n"
+        "case.\n"
+        "Also containing a few newlines.\n\n"
+        "   Indented new lines must be honoured!\n\n"
         "Subcommands:\n"
         "  cmd1                   Help for\n"
         "                         command number\n"

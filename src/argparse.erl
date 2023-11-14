@@ -871,10 +871,7 @@ validate_command([{Name, Cmd} | _] = Path, Prefixes) ->
             <<"command name must be a string not starting with option prefix">>),
     is_map(Cmd) orelse
         ?INVALID(command, Cmd, Path, commands, <<"expected command()">>),
-    (maps:find(help, Cmd) =:= {ok, hidden}) orelse (io_lib:printable_unicode_list(maps:get(help, Cmd, []))) orelse
-        (is_list(maps:get(help, Cmd, [])) andalso lists:all(
-            fun (Atom) when Atom =:= usage; Atom =:= commands; Atom =:= arguments; Atom =:= options -> true;
-                (Str) -> io_lib:printable_unicode_list(Str) end, maps:get(help, Cmd, []))) orelse
+    is_valid_command_help(maps:get(help, Cmd, [])) orelse
         ?INVALID(command, Cmd, Path, help, <<"must be a printable unicode list, or a command help template">>),
     is_map(maps:get(commands, Cmd, #{})) orelse
         ?INVALID(command, Cmd, Path, commands, <<"expected map of #{string() => command()}">>),
@@ -966,6 +963,8 @@ validate_action(count, _Path, _Opt) ->
 validate_action(extend, _Path, #{nargs := Nargs}) when
     Nargs =:= list; Nargs =:= nonempty_list; Nargs =:= all; is_integer(Nargs) ->
     extend;
+validate_action(extend, _Path, #{type := {custom, _}}) ->
+    extend;
 validate_action(extend, Path, Arg) ->
     ?INVALID(argument, Arg, Path, action, <<"extend action works only with lists">>);
 validate_action(_Action, Path, Arg) ->
@@ -1015,14 +1014,38 @@ clean_path(Path) ->
 
 is_valid_option_help(hidden) ->
     true;
-is_valid_option_help(Help) when is_list(Help) ->
+is_valid_option_help(Help) when is_list(Help); is_binary(Help) ->
     true;
-is_valid_option_help({Short, Desc}) when is_list(Short), is_list(Desc) ->
+is_valid_option_help({Short, Desc}) when is_list(Short) orelse is_binary(Short), is_list(Desc) ->
     %% verify that Desc is a list of string/type/default
-    lists:all(fun(type) -> true; (default) -> true; (S) when is_list(S) -> true; (_) -> false end, Desc);
-is_valid_option_help({Short, Desc}) when is_list(Short), is_function(Desc, 0) ->
+    lists:all(fun(type) -> true;
+                 (default) -> true;
+                 (S) when is_list(S); is_binary(S) -> true;
+                 (_) -> false
+              end, Desc);
+is_valid_option_help({Short, Desc}) when is_list(Short) orelse is_binary(Short), is_function(Desc, 0) ->
     true;
 is_valid_option_help(_) ->
+    false.
+
+is_valid_command_help(hidden) ->
+    true;
+is_valid_command_help(Help) when is_binary(Help) ->
+    true;
+is_valid_command_help(Help) when is_list(Help) ->
+    %% allow printable lists
+    case io_lib:printable_unicode_list(Help) of
+        true ->
+            true;
+        false ->
+            %% ... or a command help template
+            lists:all(
+                fun (Atom) when Atom =:= usage; Atom =:= commands; Atom =:= arguments; Atom =:= options -> true;
+                    (Bin) when is_binary(Bin) -> true;
+                    (Str) -> io_lib:printable_unicode_list(Str)
+                end, Help)
+    end;
+is_valid_command_help(_) ->
     false.
 
 %%--------------------------------------------------------------------
@@ -1051,12 +1074,12 @@ format_help({ProgName, Root}, Format) ->
             0 ->
                 [];
             Small when Small < 4 ->
-                ["{" ++ lists:concat(lists:join("|", maps:keys(Immediate))) ++ "}"];
+                ["{" ++ lists:append(lists:join("|", maps:keys(Immediate))) ++ "}"];
             _Largs ->
                 ["<command>"]
         end,
     %% was it nested command?
-    ShortCmd = if Nested =:= [] -> ShortCmd0; true -> [lists:concat(lists:join(" ", Nested)) | ShortCmd0] end,
+    ShortCmd = if Nested =:= [] -> ShortCmd0; true -> [lists:append(lists:join(" ", Nested)) | ShortCmd0] end,
     %% format flags
     FlagsForm = if Flags =:= [] -> [];
                     true -> [unicode:characters_to_list(io_lib:format("[~tc~ts]", [Prefix, Flags]))]
@@ -1086,7 +1109,7 @@ format_help({ProgName, Root}, Format) ->
     Parts = #{usage => Usage, commands => {Long, Subs},
         arguments => {Longest, PosL}, options => {Longest, OptL}},
     Width = maps:get(columns, Format, 80), %% might also use io:columns() here
-    lists:concat([format_width(maps:find(Part, Parts), Part, Width) || Part <- Template]).
+    lists:append([format_width(maps:find(Part, Parts), Part, Width) || Part <- Template]).
 
 %% collects options on the Path, and returns found Command
 collect_options(CmdName, Command, [], Args) ->
@@ -1103,7 +1126,7 @@ maybe_add(ToAdd, _List, Element, Template) ->
     Template ++ [io_lib:format(ToAdd, []), Element].
 
 format_width(error, Part, Width) ->
-    wordwrap(Part, 0, Width);
+    wrap_text(Part, 0, Width);
 format_width({ok, [ProgName, ShortCmd, FlagsForm, Opts, Args]}, usage, Width) ->
     %% make every separate command/option to be a "word", and then
     %% wordwrap it indented by the ProgName length + 3
@@ -1111,32 +1134,41 @@ format_width({ok, [ProgName, ShortCmd, FlagsForm, Opts, Args]}, usage, Width) ->
     if Words =:= [] -> io_lib:format("  ~ts", [ProgName]);
         true ->
             Indent = string:length(ProgName),
-            Wrapped = wrap(Words, Width - Indent, 0, [], []),
-            Pad = lists:duplicate(Indent + 3, " "),
+            Wrapped = wordwrap(Words, Width - Indent, 0, [], []),
+            Pad = lists:append(lists:duplicate(Indent + 3, " ")),
             ArgLines = lists:join([io_lib:nl() | Pad], Wrapped),
-            io_lib:format("  ~ts ~ts", [ProgName, ArgLines])
+            io_lib:format("  ~ts~ts", [ProgName, ArgLines])
     end;
 format_width({ok, {Len, Texts}}, _Part, Width) ->
     SubFormat = io_lib:format("  ~~-~bts ~~ts~n", [Len]),
-    [io_lib:format(SubFormat, [N, wordwrap(D, Len + 3, Width)]) || {N, D} <- lists:reverse(Texts)].
+    [io_lib:format(SubFormat, [N, wrap_text(D, Len + 3, Width)]) || {N, D} <- lists:reverse(Texts)].
 
-wordwrap(Text, Indent, Width) ->
-    Lines = wrap(string:split(Text, " ", all), Width - Indent, 0, [], []),
+wrap_text(Text, Indent, Width) ->
+    %% split text into separate lines (paragraphs)
     NL = io_lib:nl(),
-    Pad = lists:duplicate(Indent, " "),
-    lists:join([NL | Pad], Lines).
+    Lines = string:split(Text, NL, all),
+    %% wordwrap every paragraph
+    Paragraphs = lists:append([wrap_line(L, Width, Indent) || L <- Lines]),
+    Pad = lists:append(lists:duplicate(Indent, " ")),
+    lists:join([NL | Pad], Paragraphs).
 
-wrap([], _Max, _Len, Line, Lines) ->
+wrap_line([], _Width, _Indent) ->
+    [[]];
+wrap_line(Line, Width, Indent) ->
+    [First | Tail] = string:split(Line, " ", all),
+    wordwrap(Tail, Width - Indent, string:length(First), First, []).
+
+wordwrap([], _Max, _Len, [], Lines) ->
+    lists:reverse(Lines);
+wordwrap([], _Max, _Len, Line, Lines) ->
     lists:reverse([Line | Lines]);
-wrap([Word | Tail], Max, Len, Line, Lines) ->
+wordwrap([Word | Tail], Max, Len, Line, Lines) ->
     WordLen = string:length(Word),
     case Len + 1 + WordLen > Max of
         true ->
-            wrap(Tail, Max, WordLen, Word, [Line | Lines]);
-        false when Line =:= [] ->
-            wrap(Tail, Max, WordLen + 1 + Len, Word, Lines);
+            wordwrap(Tail, Max, WordLen, Word, [Line | Lines]);
         false ->
-            wrap(Tail, Max, WordLen + 1 + Len, Line ++ [$ | Word], Lines)
+            wordwrap(Tail, Max, WordLen + 1 + Len, [Line, <<" ">>, Word], Lines)
     end.
 
 %% create help line for every option, collecting together all flags, short options,
@@ -1157,10 +1189,10 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) when ?IS_
                 {"", []};
             {ok, Long} when NonOption, RequiresArg ->
                 FN = [Prefix | Long],
-                {FN, [format_required(true, FN ++ " ", Opt)]};
+                {FN, [format_required(true, [FN, " "], Opt)]};
             {ok, Long} when RequiresArg ->
                 FN = [Prefix | Long],
-                {FN, [format_required(false, FN ++ " ", Opt)]};
+                {FN, [format_required(false, [FN, " "], Opt)]};
             {ok, Long} when NonOption ->
                 FN = [Prefix | Long],
                 {FN, [FN]};
@@ -1176,7 +1208,7 @@ format_opt_help(Opt, {Prefix, Longest, Flags, Opts, Args, OptL, PosL}) when ?IS_
             {ok, Short} when RequiresArg ->
                 SN = [Prefix, Short],
                 {maybe_concat(SN, Name0), [],
-                    [format_required(NonOption, SN ++ " ", Opt) | MaybeOpt0]};
+                    [format_required(NonOption, [SN, " "], Opt) | MaybeOpt0]};
             {ok, Short} ->
                 {maybe_concat([Prefix, Short], Name0), [Short], MaybeOpt0}
         end,
@@ -1210,7 +1242,7 @@ format_opt_help(#{name := Name} = Opt, {Prefix, Longest, Flags, Opts, Args, OptL
 format_description(#{help := {_Short, Fun}}) when is_function(Fun, 0) ->
     Fun();
 format_description(#{help := {_Short, Desc}} = Opt) ->
-    lists:flatmap(
+    lists:map(
         fun (type) ->
                 format_type(Opt);
             (default) ->
@@ -1234,7 +1266,7 @@ format_description(#{name := Name} = Opt) ->
 
 %% option formatting helpers
 maybe_concat(No, []) -> No;
-maybe_concat(No, L) -> No ++ ", " ++ L.
+maybe_concat(No, L) -> [No, ", ", L].
 
 format_required(true, Extra, #{name := Name} = Opt) ->
     io_lib:format("~ts<~ts>~ts", [Extra, Name, format_nargs(Opt)]);
