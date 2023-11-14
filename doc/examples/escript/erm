@@ -5,10 +5,7 @@
 %%  ERL_FLAGS="-pa ../../../_build/default/lib/argparse/ebin" ./erm -rf dir
 
 main(Args) ->
-    #{force := Force, recursive := Recursive, dir := Dir} =
-        argparse:parse(Args, cli()),
-    io:format("Removing ~s (force: ~s, recursive: ~s)~n",
-        [Dir, Force, Recursive]).
+    io:format("~ts~n", [argparse:help(cli())]).
 
 %% parser specification
 cli() ->
