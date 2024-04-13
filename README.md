@@ -16,7 +16,7 @@ A mini-framework to create complex cli. Inspired by Python argparse.
 > There are minor differences in the command line options description between
 > `args` and OTP `argparse`:
 >  * `int` type is renamed `integer`
->  * exceptions are accompanied with extended error information
+>  * exceptions are accompanied by extended error information
 
 Follows conventions of  Unix Utility Argument Syntax.
 
