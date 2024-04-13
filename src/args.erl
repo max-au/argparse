@@ -14,7 +14,7 @@
 %%% If root level command does not contain any sub-commands, parser returns plain map of
 %%% argument names to their values:
 %%% ```
-%%% 3> argparse:parse(["value"], #{arguments => [#{name => arg}]}).
+%%% 3> args:parse(["value"], #{arguments => [#{name => arg}]}).
 %%% #{arg => "value"}
 %%% '''
 %%% This map contains all arguments matching command line passed, initialised with
@@ -30,12 +30,12 @@
 %%% ```
 %%% 4> Cmd =  #{arguments => [#{name => arg}]}.
 %%% #{arguments => [#{name => arg}]}
-%%% 5> argparse:parse(["cmd", "value"], #{commands => #{"cmd" => Cmd}}).
+%%% 5> args:parse(["cmd", "value"], #{commands => #{"cmd" => Cmd}}).
 %%% {#{arg => "value"},{"cmd",#{arguments => [#{name => arg}]}}}
 %%% '''
 %%% @end
 
--module(argparse).
+-module(args).
 -author("maximfca@gmail.com").
 
 -export([
@@ -288,7 +288,7 @@ help(Command, Options) ->
     unicode:characters_to_list(format_help(validate(Command, Options), Options)).
 
 %% @doc Format exception reasons produced by parse/2.
-%% Exception of class error with reason {argparse, Reason} is normally
+%% Exception of class error with reason {args, Reason} is normally
 %%  raised, and format_error accepts only the Reason part, leaving
 %%  other exceptions that do not belong to argparse out.
 %% @returns string, ready to be printed via io:format().

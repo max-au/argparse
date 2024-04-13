@@ -1,6 +1,6 @@
 {application, argparse,
  [{description, "argparse: arguments parser, and cli framework"},
-  {vsn, "1.2.4"},
+  {vsn, "2.0.0"},
   {applications,
    [kernel,
     stdlib

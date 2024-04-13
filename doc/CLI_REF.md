@@ -41,7 +41,7 @@ Creating a new application exposing CLI is as simple as:
 1. Running `rebar3 new escript conf_reader`
 2. Adding `argparse` to `deps` and `escript_incl_apps` in rebar.config
 3. Add a function (`cli/0`) declaring CLI arguments
-4. Use the specification: `argparse:parse(Args, cli())`
+4. Use the specification: `args:parse(Args, cli())`
 5. Run `rebar3 escriptize` to build the application.
 
 ## Command-line interface discovery

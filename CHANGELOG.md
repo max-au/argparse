@@ -1,5 +1,8 @@
 # Changelog
 
+### Version 2.0.0
+* renamed `argparse` module to `args`, to avoid name clash with OTP 26
+
 ### Version 1.2.4:
 * minor spec fixes
 

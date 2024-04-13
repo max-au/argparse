@@ -142,7 +142,7 @@
 
        main(Args) ->
            #{force := Force, recursive := Recursive, dir := Dir} =
-               argparse:parse(Args, cli()),
+               args:parse(Args, cli()),
            io:format("Removing ~s (force: ~s, recursive: ~s)~n",
                [Dir, Force, Recursive]).
 
