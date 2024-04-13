@@ -15,7 +15,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(argparse_SUITE).
+-module(args_SUITE).
 -author("maximfca@gmail.com").
 
 -export([suite/0, all/0, groups/0]).
@@ -31,7 +31,7 @@
     unicode/0, unicode/1,
     parser_error/0, parser_error/1,
     nargs/0, nargs/1,
-    argparse/0, argparse/1,
+    args/0, args/1,
     negative/0, negative/1,
     nodigits/0, nodigits/1,
     pos_mixed_with_opt/0, pos_mixed_with_opt/1,
@@ -65,7 +65,7 @@ groups() ->
         {parser, [parallel], [
             readme, basic, long_form_eq, built_in_types, type_validators,
             invalid_arguments, complex_command, unicode, parser_error,
-            nargs, argparse, negative, nodigits, pos_mixed_with_opt,
+            nargs, args, negative, nodigits, pos_mixed_with_opt,
             default_for_not_required, global_default, subcommand,
             very_short, multi_short, proxy_arguments
         ]},
@@ -92,16 +92,16 @@ prog() ->
 
 parser_error(CmdLine, CmdMap) ->
     {error, Reason} = parse(CmdLine, CmdMap),
-    unicode:characters_to_list(argparse:format_error(Reason)).
+    unicode:characters_to_list(args:format_error(Reason)).
 
 parse_opts(Args, Opts) ->
-    argparse:parse(string:lexemes(Args, " "), #{arguments => Opts}).
+    args:parse(string:lexemes(Args, " "), #{arguments => Opts}).
 
 parse(Args, Command) ->
-    argparse:parse(string:lexemes(Args, " "), Command).
+    args:parse(string:lexemes(Args, " "), Command).
 
 parse_cmd(Args, Command) ->
-    argparse:parse(string:lexemes(Args, " "), #{commands => Command}).
+    args:parse(string:lexemes(Args, " "), #{commands => Command}).
 
 %% ubiquitous command, containing sub-commands, and all possible option types
 %% with all nargs. Not all combinations though.
@@ -176,14 +176,14 @@ readme(Config) when is_list(Config) ->
         ]
     },
     ?assertEqual({ok, #{dir => "dir", force => true, recursive => true}, [Prog], Rm},
-        argparse:parse(["-rf", "dir"], Rm)),
+        args:parse(["-rf", "dir"], Rm)),
     %% override progname
     ?assertEqual("Usage:\n  readme\n",
-        unicode:characters_to_list(argparse:help(#{}, #{progname => "readme"}))),
+        unicode:characters_to_list(args:help(#{}, #{progname => "readme"}))),
     ?assertEqual("Usage:\n  readme\n",
-        unicode:characters_to_list(argparse:help(#{}, #{progname => readme}))),
+        unicode:characters_to_list(args:help(#{}, #{progname => readme}))),
     ?assertEqual("Usage:\n  readme\n",
-        unicode:characters_to_list(argparse:help(#{}, #{progname => <<"readme">>}))),
+        unicode:characters_to_list(args:help(#{}, #{progname => <<"readme">>}))),
     %% test that command has priority over just a positional argument:
     %%  - parsing "opt sub" means "find positional argument "pos", then enter subcommand
     %%  - parsing "sub opt" means "enter sub-command, and then find positional argument"
@@ -200,14 +200,14 @@ basic(Config) when is_list(Config) ->
     Prog = prog(),
     %% empty command, with full options path
     ?assertMatch({ok, #{}, [Prog, "cmd"], #{}},
-        argparse:parse(["cmd"], #{commands => #{"cmd" => #{}}})),
+        args:parse(["cmd"], #{commands => #{"cmd" => #{}}})),
     %% sub-command, with no path, but user-supplied argument
     ?assertEqual({ok, #{}, [Prog, "cmd", "sub"], #{attr => pos}},
-        argparse:parse(["cmd", "sub"], #{commands => #{"cmd" => #{commands => #{"sub" => #{attr => pos}}}}})),
+        args:parse(["cmd", "sub"], #{commands => #{"cmd" => #{commands => #{"sub" => #{attr => pos}}}}})),
     %% command with positional argument
     PosCmd = #{arguments => [#{name => pos}]},
     ?assertEqual({ok, #{pos => "arg"}, [Prog, "cmd"], PosCmd},
-        argparse:parse(["cmd", "arg"], #{commands => #{"cmd" => PosCmd}})),
+        args:parse(["cmd", "arg"], #{commands => #{"cmd" => PosCmd}})),
     %% command with optional argument
     OptCmd = #{arguments => [#{name => force, short => $f, type => boolean}]},
     ?assertEqual({ok, #{force => true}, [Prog, "rm"], OptCmd},
@@ -302,7 +302,7 @@ type_validators(Config) when is_list(Config) ->
     %% ensure the atom does not exist
     ?assertException(error, badarg, list_to_existing_atom("$can_never_be")),
     {ok, ArgMap, _, _} = parse_opts("$can_never_be", [#{name => atom, type => {atom, unsafe}}]),
-    argparse:validate(#{arguments => [#{name => atom, type => {atom, unsafe}}]}),
+    args:validate(#{arguments => [#{name => atom, type => {atom, unsafe}}]}),
     %% now that atom exists, because argparse created it (in an unsafe way!)
     ?assertEqual(list_to_existing_atom("$can_never_be"), maps:get(atom, ArgMap)),
     %% test successful user-defined conversion
@@ -363,7 +363,7 @@ invalid_arguments(Config) when is_list(Config) ->
     ?assertEqual({error, {Prog, FloatChoices, "1.3", <<"is not one of the choices">>}},
         parse_opts("1.3", [FloatChoices])),
     %% unsuccessful user-defined conversion
-    ?assertMatch({error, {Prog, _, "REV", <<"failed faildation">>}},
+    ?assertMatch({error, {Prog, _, "REV", <<"failed validation">>}},
         parse_opts("REV", [#{name => user, type => {custom, fun (Str) -> integer_to_binary(Str) end}}])).
 
 complex_command() ->
@@ -380,7 +380,7 @@ complex_command(Config) when is_list(Config) ->
         #{name => string, help => "alias for string option", action => extend, nargs => list}
     ]},
     CmdMap = #{commands => #{"start" => Command}},
-    Parsed = argparse:parse(string:lexemes("start --float 1.04 -f 112 -b -b -s s1 42 --string s2 s3 s4", " "), CmdMap),
+    Parsed = args:parse(string:lexemes("start --float 1.04 -f 112 -b -b -s s1 42 --string s2 s3 s4", " "), CmdMap),
     Expected = #{float => [1.04, 112], boolean => [true, true], integer => 42, string => ["s1", "s2", "s3", "s4"]},
     ?assertEqual({ok, Expected, [prog(), "start"], Command}, Parsed).
 
@@ -397,18 +397,18 @@ unicode(Config) when is_list(Config) ->
     Cmd = #{arguments => [#{name => text, type => binary, help => "åäö", default => <<"★"/utf8>>}]},
     Expected = #{text => <<"★"/utf8>>},
     Prog = [prog()],
-    ?assertEqual({ok, Expected, Prog, Cmd}, argparse:parse([], Cmd)), %% default
-    ?assertEqual({ok, Expected, Prog, Cmd}, argparse:parse(["★"], Cmd)), %% specified in the command line
+    ?assertEqual({ok, Expected, Prog, Cmd}, args:parse([], Cmd)), %% default
+    ?assertEqual({ok, Expected, Prog, Cmd}, args:parse(["★"], Cmd)), %% specified in the command line
     ?assertEqual("Usage:\n  " ++ prog() ++ " <text>\n\nArguments:\n  text åäö (binary, ★)\n",
-        unicode:characters_to_list(argparse:help(Cmd))),
+        unicode:characters_to_list(args:help(Cmd))),
     %% test command name and argument name in unicode
     Uni = #{commands => #{"åäö" => #{help => "öФ"}}, handler => optional,
         arguments => [#{name => "Ф", short => $ä, long => "åäö"}]},
     UniExpected = "Usage:\n  " ++ prog() ++
         " {åäö} [-ä <Ф>] [-åäö <Ф>]\n\nSubcommands:\n  åäö      öФ\n\nOptional arguments:\n  -ä, -åäö Ф\n",
-    ?assertEqual(UniExpected, unicode:characters_to_list(argparse:help(Uni))),
+    ?assertEqual(UniExpected, unicode:characters_to_list(args:help(Uni))),
     ParsedExpected = #{"Ф" => "öФ"},
-    ?assertEqual({ok, ParsedExpected, Prog, Uni}, argparse:parse(["-ä", "öФ"], Uni)).
+    ?assertEqual({ok, ParsedExpected, Prog, Uni}, args:parse(["-ä", "öФ"], Uni)).
 
 parser_error() ->
     [{doc, "Tests error tuples that the parser returns"}].
@@ -521,10 +521,10 @@ nargs(Config) when is_list(Config) ->
     ?assertEqual({ok, #{short49 => 2}, Prog, Cmd},
         parse("-1 arg1 --force", Cmd)).
 
-argparse() ->
+args() ->
     [{doc, "Tests success cases, inspired by argparse in Python"}].
 
-argparse(Config) when is_list(Config) ->
+args(Config) when is_list(Config) ->
     Prog = [prog()],
     Parser = #{arguments => [
         #{name => sum, long => "-sum", action => {store, sum}, default => max},
@@ -599,10 +599,10 @@ negative(Config) when is_list(Config) ->
     %% negative number options present, so both -1s are options
     ?assertMatch({error, {_, _, undefined, _}}, parse("-1 -1", Parser2)),
     %% no "-" prefix, can only be an integer
-    ?assertMatch({ok, #{foo := "-1"}, _, _}, argparse:parse(["-1"], Parser2, #{prefixes => "+"})),
+    ?assertMatch({ok, #{foo := "-1"}, _, _}, args:parse(["-1"], Parser2, #{prefixes => "+"})),
     %% no "-" prefix, can only be an integer, but just one integer!
     ?assertMatch({error, {_, undefined, "-1", _}},
-        argparse:parse(["-2", "-1"], Parser2, #{prefixes => "+"})),
+        args:parse(["-2", "-1"], Parser2, #{prefixes => "+"})),
     %% just in case, floats work that way too...
     ?assertMatch({error, {_, undefined, "-2", _}},
         parse("-2", #{arguments => [#{name => one, long => "1.2"}]})).
@@ -618,7 +618,7 @@ nodigits(Config) when is_list(Config) ->
     ]},
     %% ensure not to consume optional prefix
     ?assertEqual({ok, #{extra => "X", arg => ["a","b","3"]}, [prog()], Parser3},
-        argparse:parse(string:lexemes("-3 port a b 3 +3 X", " "), Parser3, #{prefixes => "-+"})).
+        args:parse(string:lexemes("-3 port a b 3 +3 X", " "), Parser3, #{prefixes => "-+"})).
 
 pos_mixed_with_opt() ->
     [{doc, "Tests that optional argument correctly consumes expected argument"
@@ -647,7 +647,7 @@ global_default() ->
 
 global_default(Config) when is_list(Config) ->
     ?assertMatch({ok, #{def := "global"}, _, _},
-        argparse:parse("", #{arguments => [#{name => def, type => integer, required => false}]},
+        args:parse("", #{arguments => [#{name => def, type => integer, required => false}]},
         #{default => "global"})).
 
 subcommand() ->
@@ -776,7 +776,7 @@ usage(Config) when is_list(Config) ->
         "  -i           interval set (int >= 1)\n"
         "  --req        required optional, right?\n"
         "  --float      floating-point long form argument (float, 3.14)\n",
-    ?assertEqual(Usage, unicode:characters_to_list(argparse:help(Cmd, #{command => ["start"]}))),
+    ?assertEqual(Usage, unicode:characters_to_list(args:help(Cmd, #{command => ["start"]}))),
     FullCmd = "Usage:\n  " ++ prog() ++
         " <command> [-rfv] [--force] [-i <interval>] [--req <weird>] [--float <float>]\n\n"
         "Subcommands:\n"
@@ -790,7 +790,7 @@ usage(Config) when is_list(Config) ->
         "  -i          interval set (int >= 1)\n"
         "  --req       required optional, right?\n"
         "  --float     floating-point long form argument (float, 3.14)\n",
-    ?assertEqual(FullCmd, unicode:characters_to_list(argparse:help(Cmd))),
+    ?assertEqual(FullCmd, unicode:characters_to_list(args:help(Cmd))),
     CrawlerStatus = "Usage:\n  " ++ prog() ++ " status crawler [-rfv] [---extra <extra>] [--force] [-i <interval>]\n"
         "      [--req <weird>] [--float <float>]\n\nOptional arguments:\n"
         "  ---extra    extra option very deep\n  -r          recursive\n"
@@ -798,7 +798,7 @@ usage(Config) when is_list(Config) ->
         "  -i          interval set (int >= 1)\n"
         "  --req       required optional, right?\n"
         "  --float     floating-point long form argument (float, 3.14)\n",
-    ?assertEqual(CrawlerStatus, unicode:characters_to_list(argparse:help(Cmd, #{command => ["status", "crawler"]}))),
+    ?assertEqual(CrawlerStatus, unicode:characters_to_list(args:help(Cmd, #{command => ["status", "crawler"]}))),
     ok.
 
 usage_required_args() ->
@@ -807,7 +807,7 @@ usage_required_args() ->
 usage_required_args(Config) when is_list(Config) ->
     Cmd = #{commands => #{"test" => #{arguments => [#{name => required, required => true, long => "-req"}]}}},
     Expected = "Usage:\n  " ++ prog() ++ " test --req <required>\n\nOptional arguments:\n  --req required\n",
-    ?assertEqual(Expected, unicode:characters_to_list(argparse:help(Cmd, #{command => ["test"]}))).
+    ?assertEqual(Expected, unicode:characters_to_list(args:help(Cmd, #{command => ["test"]}))).
 
 usage_template() ->
     [{doc, "Tests templates in help/usage"}].
@@ -821,7 +821,7 @@ usage_template(Config) when is_list(Config) ->
         help => {"[-s SHARD]", ["initial number, ", type, <<" with a default value of ">>, default]}}
     ]},
     ?assertEqual("Usage:\n  " ++ prog() ++ " [-s SHARD]\n\nArguments:\n  shard initial number, int with a default value of 0\n",
-        unicode:characters_to_list(argparse:help(Cmd, #{}))),
+        unicode:characters_to_list(args:help(Cmd, #{}))),
     %% Optional
     Cmd1 = #{arguments => [#{
         name => shard,
@@ -831,7 +831,7 @@ usage_template(Config) when is_list(Config) ->
         help => {<<"[-s SHARD]">>, ["initial number"]}}
     ]},
     ?assertEqual("Usage:\n  " ++ prog() ++ " [-s SHARD]\n\nOptional arguments:\n  -s initial number\n",
-        unicode:characters_to_list(argparse:help(Cmd1, #{}))),
+        unicode:characters_to_list(args:help(Cmd1, #{}))),
     %% ISO Date example
     DefaultRange = {{2020, 1, 1}, {2020, 6, 22}},
     CmdISO = #{
@@ -850,7 +850,7 @@ usage_template(Config) when is_list(Config) ->
         ]
     },
     ?assertEqual("Usage:\n  " ++ prog() ++ " [--range RNG]\n\nOptional arguments:\n  -r, --range date range, 2020-1-1..2020-6-22\n",
-        unicode:characters_to_list(argparse:help(CmdISO, #{}))),
+        unicode:characters_to_list(args:help(CmdISO, #{}))),
     ok.
 
 parser_error_usage() ->
@@ -881,7 +881,7 @@ command_usage(Config) when is_list(Config) ->
         help => ["Options:\n", options, arguments, <<"NOTAUSAGE">>, usage, "\n"]
     },
     ?assertEqual("Options:\n  -o  option help\n  arg argument help\nNOTAUSAGE  " ++ prog() ++ " [-o <opt>] <arg>\n",
-        unicode:characters_to_list(argparse:help(Cmd, #{}))).
+        unicode:characters_to_list(args:help(Cmd, #{}))).
 
 usage_width() ->
     [{doc, "Test usage fitting in the viewport"}].
@@ -936,7 +936,7 @@ Also containing a few newlines.
         "  -v                     v\n"
         "  -q                     q\n",
 
-    ?assertEqual(Expected, unicode:characters_to_list(argparse:help(Cmd, #{columns => 40}))).
+    ?assertEqual(Expected, unicode:characters_to_list(args:help(Cmd, #{columns => 40}))).
 
 %%--------------------------------------------------------------------
 %% Validator Test Cases
@@ -947,26 +947,26 @@ validator_exception() ->
 validator_exception(Config) when is_list(Config) ->
     Prg = [prog()],
     %% conflicting option names
-    ?assertException(error, {argparse, argument, Prg, short, "short conflicting with previously defined short for one"},
-        argparse:validate(#{arguments => [#{name => one, short => $$}, #{name => two, short => $$}]})),
-    ?assertException(error, {argparse, argument, Prg, long, "long conflicting with previously defined long for one"},
-        argparse:validate(#{arguments => [#{name => one, long => "a"}, #{name => two, long => "a"}]})),
+    ?assertException(error, {args, argument, Prg, short, "short conflicting with previously defined short for one"},
+        args:validate(#{arguments => [#{name => one, short => $$}, #{name => two, short => $$}]})),
+    ?assertException(error, {args, argument, Prg, long, "long conflicting with previously defined long for one"},
+        args:validate(#{arguments => [#{name => one, long => "a"}, #{name => two, long => "a"}]})),
     %% broken options
     %% long must be a string
-    ?assertException(error, {argparse, argument, Prg, long, _},
-        argparse:validate(#{arguments => [#{name => one, long => ok}]})),
+    ?assertException(error, {args, argument, Prg, long, _},
+        args:validate(#{arguments => [#{name => one, long => ok}]})),
     %% short must be a printable character
-    ?assertException(error, {argparse, argument, Prg, short, _},
-        argparse:validate(#{arguments => [#{name => one, short => ok}]})),
-    ?assertException(error, {argparse, argument, Prg, short, _},
-        argparse:validate(#{arguments => [#{name => one, short => 7}]})),
+    ?assertException(error, {args, argument, Prg, short, _},
+        args:validate(#{arguments => [#{name => one, short => ok}]})),
+    ?assertException(error, {args, argument, Prg, short, _},
+        args:validate(#{arguments => [#{name => one, short => 7}]})),
     %% required is a boolean
-    ?assertException(error, {argparse, argument, Prg, required, _},
-        argparse:validate(#{arguments => [#{name => one, required => ok}]})),
-    ?assertException(error, {argparse, argument, Prg, help, _},
-        argparse:validate(#{arguments => [#{name => one, help => ok}]})),
+    ?assertException(error, {args, argument, Prg, required, _},
+        args:validate(#{arguments => [#{name => one, required => ok}]})),
+    ?assertException(error, {args, argument, Prg, help, _},
+        args:validate(#{arguments => [#{name => one, help => ok}]})),
     %% broken commands
-    try argparse:help(#{}, #{progname => 123}), ?assert(false)
+    try args:help(#{}, #{progname => 123}), ?assert(false)
     catch error:badarg:Stack ->
         [{_, _, _, Ext} | _] = Stack,
         #{cause := #{2 := Detail}} = proplists:get_value(error_info, Ext),
@@ -974,23 +974,23 @@ validator_exception(Config) when is_list(Config) ->
     end,
     %% not-a-list of arguments provided to a subcommand
     Prog = prog(),
-    ?assertException(error, {argparse, command, [Prog, "start"], arguments, <<"expected a list, [argument()]">>},
-        argparse:validate(#{commands => #{"start" => #{arguments => atom}}})),
+    ?assertException(error, {args, command, [Prog, "start"], arguments, <<"expected a list, [argument()]">>},
+        args:validate(#{commands => #{"start" => #{arguments => atom}}})),
     %% command is not a map
-    ?assertException(error, {argparse, command, Prg, commands, <<"expected map of #{string() => command()}">>},
-        argparse:validate(#{commands => []})),
+    ?assertException(error, {args, command, Prg, commands, <<"expected map of #{string() => command()}">>},
+        args:validate(#{commands => []})),
     %% invalid commands field
-    ?assertException(error, {argparse, command, Prg, commands, _},
-        argparse:validate(#{commands => ok})),
-    ?assertException(error, {argparse, command, _, commands, _},
-        argparse:validate(#{commands => #{ok => #{}}})),
-    ?assertException(error, {argparse, command, _, help,
+    ?assertException(error, {args, command, Prg, commands, _},
+        args:validate(#{commands => ok})),
+    ?assertException(error, {args, command, _, commands, _},
+        args:validate(#{commands => #{ok => #{}}})),
+    ?assertException(error, {args, command, _, help,
         <<"must be a printable unicode list, or a command help template">>},
-        argparse:validate(#{commands => #{"ok" => #{help => ok}}})),
-    ?assertException(error, {argparse, command, _, handler, _},
-        argparse:validate(#{commands => #{"ok" => #{handler => fun validator_exception/0}}})),
+        args:validate(#{commands => #{"ok" => #{help => ok}}})),
+    ?assertException(error, {args, command, _, handler, _},
+        args:validate(#{commands => #{"ok" => #{handler => fun validator_exception/0}}})),
     %% extend + maybe: validator exception
-    ?assertException(error, {argparse, argument, _, action, <<"extend action works only with lists">>},
+    ?assertException(error, {args, argument, _, action, <<"extend action works only with lists">>},
         parse("-1 -1", #{arguments =>
         [#{action => extend, name => short49, nargs => 'maybe', short => 49}]})).
 
@@ -1000,11 +1000,11 @@ validator_exception_format() ->
 validator_exception_format(Config) when is_list(Config) ->
     %% set up as a contract: test that EEP-54 transformation is done (but don't check strings)
     try
-        argparse:validate(#{commands => #{"one" => #{commands => #{"two" => atom}}}}),
+        args:validate(#{commands => #{"one" => #{commands => #{"two" => atom}}}}),
         ?assert(false)
     catch
         error:R1:S1 ->
-            #{1 := Cmd, reason := RR1, general := G} = argparse:format_error(R1, S1),
+            #{1 := Cmd, reason := RR1, general := G} = args:format_error(R1, S1),
             ?assertEqual("command specification is invalid", unicode:characters_to_list(G)),
             ?assertEqual("command \"" ++ prog() ++ " one two\": invalid field 'commands', reason: expected command()",
                 unicode:characters_to_list(RR1)),
@@ -1012,11 +1012,11 @@ validator_exception_format(Config) when is_list(Config) ->
     end,
     %% check argument
     try
-        argparse:validate(#{arguments => [#{}]}),
+        args:validate(#{arguments => [#{}]}),
         ?assert(false)
     catch
         error:R2:S2 ->
-            #{1 := Cmd2, reason := RR2, general := G2} = argparse:format_error(R2, S2),
+            #{1 := Cmd2, reason := RR2, general := G2} = args:format_error(R2, S2),
             ?assertEqual("argument specification is invalid", unicode:characters_to_list(G2)),
             ?assertEqual("command \"" ++ prog() ++
                 "\", argument '', invalid field 'name': argument must be a map containing 'name' field",
@@ -1028,7 +1028,7 @@ validator_exception_format(Config) when is_list(Config) ->
 %% Validator Test Cases
 
 run_handle() ->
-    [{doc, "Very basic tests for argparse:run/3, choice of handlers formats"}].
+    [{doc, "Very basic tests for args:run/3, choice of handlers formats"}].
 
 %% fun((arg_map()) -> term()) |    %% handler accepting arg_map
 %% {module(), Fn :: atom()} |      %% handler, accepting arg_map, Fn exported from module()
@@ -1038,23 +1038,23 @@ run_handle() ->
 run_handle(Config) when is_list(Config) ->
     %% no subcommand, basic fun handler with argmap
     ?assertEqual(6,
-        argparse:run(["-i", "3"], #{handler => fun (#{in := Val}) -> Val * 2 end,
+        args:run(["-i", "3"], #{handler => fun (#{in := Val}) -> Val * 2 end,
         arguments => [#{name => in, short => $i, type => integer}]}, #{})),
     %% subcommand, positional fun() handler
     ?assertEqual(6,
-        argparse:run(["mul", "2", "3"], #{commands => #{"mul" => #{
+        args:run(["mul", "2", "3"], #{commands => #{"mul" => #{
             handler => {fun (match, L, R) -> L * R end, match},
             arguments => [#{name => opt, short => $o},
                 #{name => l, type => integer}, #{name => r, type => integer}]}}},
         #{})),
     %% no subcommand, positional module-based function
     ?assertEqual(6,
-        argparse:run(["2", "3"], #{handler => {erlang, '*', undefined},
+        args:run(["2", "3"], #{handler => {erlang, '*', undefined},
             arguments => [#{name => l, type => integer}, #{name => r, type => integer}]},
             #{})),
     %% subcommand, module-based function accepting argmap
     ?assertEqual([{arg, "arg"}],
-        argparse:run(["map", "arg"], #{commands => #{"map" => #{
+        args:run(["map", "arg"], #{commands => #{"map" => #{
             handler => {maps, to_list},
             arguments => [#{name => arg}]}}},
             #{})).

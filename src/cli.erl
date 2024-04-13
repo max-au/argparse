@@ -53,7 +53,7 @@
 %% Callback returning CLI mappings.
 %% Must return a command, that may contain sub-commands.
 %% Also returns arguments, and handler.
--callback cli() -> argparse:command().
+-callback cli() -> args:command().
 
 %%--------------------------------------------------------------------
 %% API
@@ -127,7 +127,7 @@ discover_commands(Modules, Options) ->
     lists:foldl(
         fun (Mod, Cmds) ->
             ModCmd =
-                try MCmd = Mod:cli(), argparse:validate(MCmd, Options), MCmd
+                try MCmd = Mod:cli(), args:validate(MCmd, Options), MCmd
                 catch
                     Class:Reason:Stack when Warn =:= warn ->
                         ?LOG_WARNING("Error calling ~ts:cli(): ~ts:~p~n~p",
@@ -166,21 +166,21 @@ discover_commands(Modules, Options) ->
 dispatch(Args, CmdMap, Modules, Options) ->
     HelpEnabled = maps:get(help, Options, true),
     %% attempt to dispatch the command
-    try argparse:parse(Args, CmdMap, Options) of
+    try args:parse(Args, CmdMap, Options) of
         {ok, ArgMap, Path, Command} ->
             run_handler(CmdMap, ArgMap, tl(Path), Command, {Modules, Options});
         {error, Reason} when HelpEnabled =:= false ->
-            io:format("error: ~ts~n", [argparse:format_error(Reason)]),
+            io:format("error: ~ts~n", [args:format_error(Reason)]),
             dispatch_error(maps:find(error, Options), Reason);
         {error, Reason} ->
             %% see if it was cry for help that triggered error message
             Prefixes = maps:get(prefixes, Options, "-"),
             case help_requested(Reason, Prefixes) of
                 false ->
-                    io:format("error: ~ts~n", [argparse:format_error(Reason)]),
-                    io:format("~ts", [argparse:help(CmdMap, Options#{command => tl(element(1, Reason))})]);
+                    io:format("error: ~ts~n", [args:format_error(Reason)]),
+                    io:format("~ts", [args:help(CmdMap, Options#{command => tl(element(1, Reason))})]);
                 CmdPath ->
-                    Fmt = argparse:help(CmdMap, Options#{command => tl(CmdPath)}),
+                    Fmt = args:help(CmdMap, Options#{command => tl(CmdPath)}),
                     io:format("~ts", [Fmt])
             end,
             dispatch_error(maps:find(error, Options), Reason)
@@ -223,7 +223,7 @@ run_handler(CmdMap, ArgMap, [], _Command, {Modules, Options}) ->
 %% finds first module that exports ctl/1 and execute it
 exec_cli([], CmdMap, _ArgMap, ArgOpts) ->
     %% command not found, let's print usage
-    io:format(argparse:help(CmdMap, ArgOpts));
+    io:format(args:help(CmdMap, ArgOpts));
 exec_cli([Mod|Tail], CmdMap, Args, ArgOpts) ->
     case erlang:function_exported(Mod, cli, length(Args)) of
         true ->

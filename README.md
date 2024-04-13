@@ -4,6 +4,14 @@
 > This project is no longer maintained, because argparse is now a part of
 > Erlang/OTP: https://www.erlang.org/doc/man/argparse.html (starting with OTP 26).
 > If you need code in `cli.erl`, feel free to copy and paste it directly in your project.
+>
+> To accommodate with this change, `argparse` module has been renamed to `args`
+> in version 2.0.0. Applications that need `argparse` for earlier OTP versions
+> can use this library until the lowest supported version is OTP 26, and then
+> just move forward to `argparse` provided by OTP.
+>
+> There are minor differences in the command line options description between
+> `args` and OTP `argparse`.
 
 
 [![Build Status](https://github.com/max-au/argparse/actions/workflows/erlang.yml/badge.svg?branch=master)](https://github.com/max-au/argparse/actions) [![Hex.pm](https://img.shields.io/hexpm/v/argparse.svg)](https://hex.pm/packages/argparse) [![Hex Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/argparse)
@@ -13,7 +21,7 @@ A mini-framework to create complex cli. Inspired by Python argparse.
 Follows conventions of  Unix Utility Argument Syntax.
 
 ```shell
-    argparse [-abcDxyz][-p arg][operand]
+    args [-abcDxyz][-p arg][operand]
 ```
 
 ## Argument parser
@@ -142,7 +150,7 @@ It is possible to use argument parser alone, without the cli mini-framework:
 
     main(Args) ->
         #{force := Force, recursive := Recursive, dir := Dir} =
-            argparse:parse(Args, cli()),
+            args:parse(Args, cli()),
         io:format("Removing ~s (force: ~s, recursive: ~s)~n",
             [Dir, Force, Recursive]).
 
