@@ -4,13 +4,13 @@
 
 main(Args) ->
     try
-        #{file := File} = Parsed = argparse:parse(Args, cli()),
+        #{file := File} = Parsed = args:parse(Args, cli()),
         {ok, Terms} = file:consult(File),
         Filtered = filter(key, Parsed, filter(app, Parsed, Terms)),
         io:format("~tp.~n", [Filtered])
     catch
-        error:{argparse, Reason} ->
-            io:format("error: ~s~n", [argparse:format_error(Reason)])
+        error:{args, Reason} ->
+            io:format("error: ~s~n", [args:format_error(Reason)])
     end.
 
 filter(ArgKey, Parsed, Terms) when is_map_key(ArgKey, Parsed) ->

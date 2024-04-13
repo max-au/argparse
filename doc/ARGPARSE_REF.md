@@ -11,17 +11,17 @@ named after ```init:get_argument(progname)```. Empty command produces empty argu
 
 It's possible to override program name using **progname** option:
 
-    2> io:format(argparse:help(#{}, #{progname => "readme"})).
+    2> io:format(args:help(#{}, #{progname => "readme"})).
     usage: readme
 
 To override default optional argument prefix (**-**), use **prefixes** option:
 
-    3> argparse:parse(["+sbwt"], #{arguments => [#{name => mode, short => $s}]}, #{prefixes => "+"}).
+    3> args:parse(["+sbwt"], #{arguments => [#{name => mode, short => $s}]}, #{prefixes => "+"}).
     #{mode => "bwt"}
 
 To define a global default for arguments that are not required, use **default** option:
 
-    4> argparse:parse([], #{arguments => [#{name => mode, required => false}]}, #{default => undef}).
+    4> args:parse([], #{arguments => [#{name => mode, required => false}]}, #{default => undef}).
     #{mode => undef}
 
 When global default is not set, resulting argument map does not include keys for arguments
@@ -32,8 +32,8 @@ that are not specified in the command line and there is no locally defined defau
 Function ```validate/1``` may be used to validate command with all sub-commands
 and options without actual parsing done.
 
-    4> argparse:validate(#{arguments => [#{short => $4}]}).
-    ** exception error: {argparse,{invalid_option,["erl"],
+    4> args:validate(#{arguments => [#{short => $4}]}).
+    ** exception error: {args,{invalid_option,["erl"],
         [],name,"argument must be a map, and specify 'name'"}}
 
 Human-readable errors and usage information is accessible via ```help/2``` and ```format_error/1,2```.
@@ -43,7 +43,7 @@ Human-readable errors and usage information is accessible via ```help/2``` and `
 If root level command does not contain any sub-commands, parser returns plain map of
 argument names to their values:
 
-    3> argparse:parse(["value"], #{arguments => [#{name => arg}]}).
+    3> args:parse(["value"], #{arguments => [#{name => arg}]}).
     #{arg => "value"}
 
 This map contains all arguments matching command line passed, initialised with
@@ -60,7 +60,7 @@ name, and a sub-spec passed for this command:
 
     4> Cmd =  #{arguments => [#{name => arg}]}.
     #{arguments => [#{name => arg}]}
-    5> argparse:parse(["cmd", "value"], #{commands => #{"cmd" => Cmd}}).
+    5> args:parse(["cmd", "value"], #{commands => #{"cmd" => Cmd}}).
     {#{arg => "value"},{"cmd",#{arguments => [#{name => arg}]}}}
 
 ## Command specification
@@ -201,13 +201,13 @@ It is not allowed to store user-defined fields in arguments.
 
 Argparse throws exceptions of class error, and Reason tuple:
 ```erlang
-    {argparse, ArgParseError}
+    {args, ArgParseError}
 ```
 To get human-readable representation:
 ```erlang
-    try argparse:parse(Args, Command)
-    catch error:{argparse, Reason} ->
-        io:format(argparse:format_error(Reason, Command, #{}))
+    try args:parse(Args, Command)
+    catch error:{args, Reason} ->
+        io:format(args:format_error(Reason, Command, #{}))
     end.
 ```
 
